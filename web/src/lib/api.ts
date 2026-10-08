@@ -1,5 +1,11 @@
-export const RELAYER_URL = process.env.NEXT_PUBLIC_RELAYER_URL ?? "http://127.0.0.1:4002";
-export const ISSUER_URL = process.env.NEXT_PUBLIC_ISSUER_URL ?? "http://127.0.0.1:4001";
+// Same-origin proxy by default: the Next.js server forwards /api/relayer/* and
+// /api/issuer/* to the internal issuer (4001) / relayer (4002) ports, so the
+// browser only ever talks to one origin (works locally and on Render without
+// exposing extra ports). Set NEXT_PUBLIC_* to override.
+export const RELAYER_URL =
+  process.env.NEXT_PUBLIC_RELAYER_URL?.trim() || "/api/relayer";
+export const ISSUER_URL =
+  process.env.NEXT_PUBLIC_ISSUER_URL?.trim() || "/api/issuer";
 
 export interface SiteConfig {
   network: string;
