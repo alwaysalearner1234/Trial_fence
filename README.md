@@ -76,6 +76,31 @@ npm run web                      # http://localhost:3000
 > Hold a key: proof artifacts are a few MB and proof generation is a second or two. The volunteer page
 > downloads snark files on first proof generation.
 
+## Render deployment (single service)
+
+A free Render **Web Service** can run the whole demo in one container
+(`scripts/render-start.mjs` boots the chain → deploys contracts → starts
+issuer/relayer → serves the web app on `$PORT`). The Next.js app proxies
+`/api/relayer/*` and `/api/issuer/*` to the internal ports, so no extra ports
+need to be opened.
+
+| Field | Value |
+|---|---|
+| Root directory | `/` |
+| Runtime | Node 22 (`.nvmrc`) |
+| Build command | `npm ci && npm run compile && npm run build -w web` |
+| Start command | `npm run start:render` |
+
+Env vars (dev values fine for a demo): `OWNER_PRIVATE_KEY`,
+`ISSUER_PRIVATE_KEY`, `RELAYER_PRIVATE_KEY`, `HMAC_SECRET`, optional
+`ISSUER_API_KEY`, `OPENAI_API_KEY`, `OPENAI_MODEL`. `PORT` is injected by
+Render; `NEXT_PUBLIC_RELAYER_URL`/`NEXT_PUBLIC_ISSUER_URL` are optional since
+the defaults point at the same-origin proxy.
+
+> The chain and `server/data` sqlite are ephemeral (reset on each deploy).
+> For a persistent deployment use a managed chain (e.g. Polygon Amoy,
+> `npm run deploy:amoy`) plus a real database.
+
 ## Demo script (2 minutes)
 
 Use the **Sponsor** tab to register protocol `1` ("TrialFence-01") and sites `1` and `2`.
