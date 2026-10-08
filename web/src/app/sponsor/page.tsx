@@ -89,10 +89,11 @@ export default function SponsorPage() {
       else e.counts.denied += 1;
       byId.set(id, e);
     };
-    for (const ev of events) bump(ev.protocolId, true);
-    for (const d of denials) bump(d.protocol_id, false);
+    for (const ev of events) bump(String(ev.protocolId), true);
+    for (const d of denials) bump(String(d.protocol_id), false);
     for (const p of protocols) {
-      if (!byId.has(p.id)) byId.set(p.id, { name: p.name, counts: { accepted: 0, denied: 0 } });
+      const id = String(p.id);
+      if (!byId.has(id)) byId.set(id, { name: p.name, counts: { accepted: 0, denied: 0 } });
     }
     return [...byId.entries()].map(([id, v]) => ({ id, name: v.name, counts: v.counts }));
   };

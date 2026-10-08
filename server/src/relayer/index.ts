@@ -299,8 +299,10 @@ app.get(
 app.get(
   "/protocols",
   wrap(async (_req, res) => {
-    const rows = getDb().prepare("SELECT id, name, scope FROM protocols ORDER BY id ASC").all();
-    res.json({ protocols: rows });
+    const rows = getDb()
+      .prepare("SELECT id, name, scope FROM protocols ORDER BY id ASC")
+      .all() as { id: number | string; name: string; scope: string }[];
+    res.json({ protocols: rows.map((r) => ({ id: String(r.id), name: r.name, scope: r.scope })) });
   })
 );
 
@@ -310,8 +312,10 @@ app.get(
 app.get(
   "/sites",
   wrap(async (_req, res) => {
-    const rows = getDb().prepare("SELECT id, name FROM sites ORDER BY id ASC").all();
-    res.json({ sites: rows });
+    const rows = getDb()
+      .prepare("SELECT id, name FROM sites ORDER BY id ASC")
+      .all() as { id: number | string; name: string }[];
+    res.json({ sites: rows.map((r) => ({ id: String(r.id), name: r.name })) });
   })
 );
 
