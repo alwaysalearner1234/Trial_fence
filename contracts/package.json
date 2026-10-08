@@ -1,0 +1,29 @@
+{
+  "name": "contracts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
+    "deploy:amoy": "hardhat run scripts/deploy.ts --network amoy"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@types/chai": "^4.3.16",
+    "@types/mocha": "^10.0.7",
+    "@types/node": "^22.10.0",
+    "hardhat": "^2.26.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@semaphore-protocol/contracts": "^4.14.3",
+    "@semaphore-protocol/group": "^4.14.3",
+    "@semaphore-protocol/identity": "^4.14.3",
+    "@semaphore-protocol/proof": "^4.14.3",
+    "@zk-kit/lean-imt.sol": "^2.0.0",
+    "ethers": "^6.13.0"
+  }
+}
