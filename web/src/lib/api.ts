@@ -10,7 +10,6 @@ export const ISSUER_URL =
 export interface SiteConfig {
   network: string;
   chainId: number;
-  rpcUrl: string;
   contractAddress: string;
   abi: unknown[];
   explorerUrl: string;
@@ -67,10 +66,11 @@ export interface SemaphoreProof {
 
 async function http<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    cache: "no-store",
   });
-  const body = (await res.json()) as T & { error?: string; detail?: string };
+  const body = (await res.json().catch(() => ({ error: "SERVICE_UNAVAILABLE", detail: "The service did not return JSON. Try again shortly." }))) as T & { error?: string; detail?: string };
   if (!res.ok) {
     throw new Error(body?.error ? `${body.error}: ${body.detail ?? "request failed"}` : `HTTP ${res.status}`);
   }
@@ -128,6 +128,15 @@ export interface EnrollmentResult {
   staticCallError?: string;
 }
 
+export interface IssuanceResult {
+  status: "accepted";
+  commitment: string;
+  leafIndex: number;
+  txHash: string;
+  explorerUrl: string;
+  note: string;
+}
+
 export const enroll = (protocolId: string, siteId: string, proof: SemaphoreProof) =>
   http<EnrollmentResult>(`${RELAYER_URL}/enroll`, {
     method: "POST",
@@ -136,9 +145,11 @@ export const enroll = (protocolId: string, siteId: string, proof: SemaphoreProof
 
 export const registerIdentity = (
   commitment: string,
-  testId: { docType: string; documentNumber: string; fullName: string }
-): Promise<number> =>
-  http<number>(`${ISSUER_URL}/register`, {
+  testId: { docType: string; documentNumber: string; fullName: string },
+  issuerToken?: string
+): Promise<IssuanceResult> =>
+  http<IssuanceResult>(`${ISSUER_URL}/register`, {
     method: "POST",
+    headers: issuerToken ? { Authorization: `Bearer ${issuerToken}` } : {},
     body: JSON.stringify({ commitment, testId }),
   });
