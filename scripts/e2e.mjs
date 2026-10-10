@@ -21,7 +21,7 @@ const check = (label, cond, extra = "") => {
 async function http(url, method = "GET", body) {
   const res = await fetch(url, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(process.env.ISSUER_API_KEY && url.startsWith(ISSUER) && method === "POST" ? { Authorization: `Bearer ${process.env.ISSUER_API_KEY}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const json = await res.json();
@@ -73,6 +73,7 @@ const testId = { docType: "passport", documentNumber: "AB1234567", fullName: "Ja
 
 let { status, json } = await http(`${ISSUER}/register`, "POST", { commitment, testId });
 check("issuer accepts first registration", status === 201 && json.status === "accepted", `leaf ${json.leafIndex}`);
+check("issuer response contains a numeric index and transaction", typeof json.leafIndex === "number" && typeof json.txHash === "string");
 
 { const dup = await http(`${ISSUER}/register`, "POST", { commitment, testId }); // same commitment + same doc
   check("same credential (and same commitment) is refused (ALREADY_MEMBER)", dup.status === 409 && dup.json.error === "ALREADY_MEMBER", dup.json.detail); }
@@ -95,9 +96,11 @@ check("our commitment is a member", group.indexOf(BigInt(commitment)) >= 0);
 console.log("\n== Enrollment (relayer → on-chain) ==");
 let r = await enroll(identity, group, P1, S1);
 check("first enroll accepted", r.json.accepted === true, `tx ${r.json.txHash}`);
+check("accepted response matches the browser contract", r.json.status === "accepted");
 
 r = await enroll(identity, group, P1, S2);
 check("duplicate at second site denied", r.json.accepted === false && r.json.reason === "DUPLICATE", r.json.reason + (r.json.detail ? ` :: ${r.json.detail}` : ""));
+check("denied response includes the browser signed record", r.json.status === "denied" && Boolean(r.json.signedRecord?.signature));
 
 r = await enroll(identity, group, P2, S1);
 check("different protocol allowed", r.json.accepted === true, `tx ${r.json.txHash}`);
@@ -164,6 +167,23 @@ const denial = denials.denials[0];
 
 const { json: mon } = await http(`${RELAYER}/monitor/summary`);
 check("monitor summary labeled", mon.observations.length > 0 && mon.observations[0].severity, mon.observations[0]?.message);
+
+// Concurrent issuance used to pass both uniqueness checks before the write lock.
+console.log("\n== Concurrent issuer requests ==");
+const before = (await getMembers()).length;
+const pair = [new Identity(), new Identity()];
+const sameDocument = { docType: "national-id", documentNumber: "RACE-123", fullName: "Test Only" };
+const race = await Promise.all(pair.map(id => http(`${ISSUER}/register`, "POST", { commitment: id.commitment.toString(), testId: sameDocument })));
+check("same document issued once under concurrent requests", race.filter(r => r.status === 201).length === 1 && race.filter(r => r.status === 409 && r.json.error === "DUPLICATE_IDENTITY").length === 1);
+const different = await Promise.all(["RACE-A", "RACE-B"].map(documentNumber => http(`${ISSUER}/register`, "POST", { commitment: new Identity().commitment.toString(), testId: { ...sameDocument, documentNumber } })));
+check("different concurrent documents receive distinct leaf indices", different.every(r => r.status === 201) && new Set(different.map(r => r.json.leafIndex)).size === 2);
+const finalMembers = await getMembers();
+const statusResult = await http(`${ISSUER}/status`);
+check("issuer mirror remains complete and ordered", finalMembers.length === before + 3 && new Group(finalMembers).root.toString() === statusResult.json.root);
+check("issuer status exposes actual contract and issuer role", typeof statusResult.json.trialFence === "string" && statusResult.json.isIssuer === true);
+
+const malformed = await http(`${RELAYER}/enroll`, "POST", { protocolId: "-1", siteId: "1", proof: {} });
+check("negative protocol ID is rejected before RPC", malformed.status === 400);
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED"}`);
 process.exit(failures === 0 ? 0 : 1);
