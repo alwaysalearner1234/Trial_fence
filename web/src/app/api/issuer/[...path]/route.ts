@@ -1,5 +1,5 @@
 // Same-origin proxy: forwards the Next.js server to the internal issuer
-// (127.0.0.1:4001). Keeps membership endpoints off the public internet.
+// (127.0.0.1:4001). This proxy is publicly reachable; it is not access control.
 const TARGET = process.env.ISSUER_INTERNAL_URL ?? "http://127.0.0.1:4001";
 
 async function proxy(req: Request, trailing: string[]): Promise<Response> {
