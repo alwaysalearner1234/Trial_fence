@@ -33,8 +33,9 @@ interface ProofInput {
 function isProofInput(value: unknown): value is ProofInput {
   const p = (value ?? {}) as Record<string, unknown>;
   return (
-    typeof p.merkleTreeDepth === "number" &&
-    typeof p.merkleTreeRoot === "string" &&
+    Number.isInteger(p.merkleTreeDepth) &&
+    Number(p.merkleTreeDepth) >= 1 && Number(p.merkleTreeDepth) <= 32 &&
+    isBigIntString(p.merkleTreeRoot) &&
     isBigIntString(p.message) &&
     isBigIntString(p.nullifier) &&
     isBigIntString(p.scope) &&
@@ -53,6 +54,7 @@ function isProofInput(value: unknown): value is ProofInput {
 function errorName(err: unknown): string {
   const message = String((err as Error)?.message ?? "");
   const name =
+    (err as { revert?: { name?: string } })?.revert?.name ??
     (err as { info?: { error?: { name?: string } } })?.info?.error?.name ??
     message.match(/reverted(?:\s*with\s*panic(?:\s*\w+)?)?\s*:\s*([A-Za-z_][\w$]+)/)?.[1];
   switch (name) {
@@ -64,6 +66,8 @@ function errorName(err: unknown): string {
       return "WRONG_SCOPE";
     case "TrialFence__SiteMismatch":
       return "SITE_MISMATCH";
+    case "TrialFence__SiteNotRegistered":
+      return "SITE_NOT_REGISTERED";
     case "TrialFence__InvalidProof":
       return "INVALID_PROOF";
     case "TrialFence__GroupHasNoMembers":
@@ -112,7 +116,8 @@ app.post(
     const expectedScope = scopeFor(protocolId);
     if (BigInt(proof.scope) !== expectedScope) {
       const record = await recordDenial(protocolId, siteId, "WRONG_SCOPE", proof.nullifier);
-      return res.json({ accepted: false, reason: "WRONG_SCOPE", denial: record });
+      return res.json({ status: "denied", accepted: false, reason: "WRONG_SCOPE", denial: record,
+        signedRecord: { message: record.digest, signature: record.signature, signer: record.signer } });
     }
 
     let receipt;
@@ -125,21 +130,30 @@ app.post(
       });
     } catch (err) {
       const reason = errorName(err);
+      // An outage is not a verified participant rejection and must not become an audit denial.
+      if (reason === "UNKNOWN") {
+        return res.status(503).json({ error: "CHAIN_UNAVAILABLE", detail: "Enrollment could not be confirmed. Retry after checking chain connectivity." });
+      }
       const record = await recordDenial(protocolId, siteId, reason, proof.nullifier);
       console.warn(
         `Enrollment refused protocol=${protocolId} site=${siteId} reason=${reason} (${(err as Error)?.message?.slice(0, 160)})`
       );
       return res.json({
+        status: "denied",
         accepted: false,
         reason,
         denial: record,
+        signedRecord: { message: record.digest, signature: record.signature, signer: record.signer },
         detail: String((err as Error)?.message ?? err),
       });
     }
 
     console.log(`Accepted enrollment protocol=${protocolId} site=${siteId} tx=${receipt.hash}`);
     return res.json({
+      status: "accepted",
       accepted: true,
+      protocolId,
+      siteId,
       txHash: receipt.hash,
       blockNumber: receipt.blockNumber,
       nullifier: proof.nullifier,
@@ -328,11 +342,10 @@ app.get(
     res.json({
       network: deployment().network,
       chainId: deployment().chainId,
-      rpcUrl: config.rpcUrl,
       contractAddress: deployment().trialFence,
       abi: trialFenceAbi(),
       explorerUrl: config.explorerUrl,
-      issuerUrl: process.env.ISSUER_URL ?? "http://127.0.0.1:4001",
+      issuerUrl: "/api/issuer",
       groupId: 1,
     });
   })
