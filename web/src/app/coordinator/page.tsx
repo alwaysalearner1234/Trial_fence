@@ -25,6 +25,7 @@ export default function CoordinatorPage() {
   const [docType, setDocType] = useState(DOC_TYPES[0]);
   const [documentNumber, setDocumentNumber] = useState("");
   const [fullName, setFullName] = useState("");
+  const [issuerToken, setIssuerToken] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -33,6 +34,7 @@ export default function CoordinatorPage() {
       const [s, m] = await Promise.all([getIssuerStatus(), getMembers()]);
       setStatus(s);
       setMembers(m.members);
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -50,7 +52,7 @@ export default function CoordinatorPage() {
         void import("@semaphore-protocol/core").then(({ Identity }) => {
           const id = Identity.import(saved);
           setCommitment(id.commitment.toString());
-        });
+        }).catch(() => { /* An invalid local identity can be recreated on the volunteer page. */ });
       } catch {
         /* ignore */
       }
@@ -65,8 +67,8 @@ export default function CoordinatorPage() {
         docType,
         documentNumber,
         fullName,
-      });
-      setOutcome({ status: "ok", message: `Membership issued to group member #${res}` });
+      }, issuerToken);
+      setOutcome({ status: "ok", message: `Membership issued to group member #${res.leafIndex}. Transaction: ${res.txHash}` });
       void refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -116,11 +118,11 @@ export default function CoordinatorPage() {
       </section>
 
       <section className="card">
-        <h2>Verify a physical ID &amp; issue membership</h2>
+        <h2>Test identity check &amp; issue membership</h2>
         <p className="hint">
-          This is the only step that touches real identity documents. The commitment below is added to the
-          shared group; it cannot be traced back to the document number, which is stored only as a one-way
-          HMAC keyed by the issuer.
+          Use fictional test data only. This demonstrates the issuer boundary, not government-ID
+          verification. The issuer stores a keyed digest and the public commitment, and can link those
+          two records. Raw document numbers and names are not stored. The participant secret stays on the device.
         </p>
 
         <fieldset>
@@ -130,6 +132,10 @@ export default function CoordinatorPage() {
             onChange={(e) => setCommitment(e.target.value.trim())}
             placeholder="0x… / decimal commitment"
           />
+        </fieldset>
+        <fieldset>
+          <label>Issuer access token (if required by this deployment)</label>
+          <input type="password" autoComplete="off" value={issuerToken} onChange={(e) => setIssuerToken(e.target.value)} />
         </fieldset>
         <div className="grid">
           <fieldset>
@@ -186,8 +192,8 @@ export default function CoordinatorPage() {
       <section className="card">
         <h2>Group members</h2>
         <p className="hint">
-          Commitments in the shared group (issuer-only view). The volunteer&apos;s trapdoor/nullifier are
-          never here.
+          Public commitments in the shared group, also read by volunteer browsers to build proofs.
+          Participant identity secrets are never here.
         </p>
         <table>
           <thead>
