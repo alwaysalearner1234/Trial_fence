@@ -117,7 +117,7 @@ Use the **Sponsor** tab to register protocol `1` ("TrialFence-01") and sites `1`
 5. Register protocol `2` and enroll site `1`: **accepted again** — the same person may join a different
    protocol, and the cross-protocol nullifiers don't link.
 
-Optional: `npm run test` runs the 16 contract tests (real Groth16 proofs). `node scripts/e2e.mjs`
+Optional: `npm run test -w contracts` runs the 21 contract tests (real Groth16 proofs). `node scripts/e2e.mjs`
 runs the smoke test end-to-end over HTTP.
 
 ## Configuration
@@ -139,6 +139,15 @@ optional `OPENAI_API_KEY` used by the AI monitor.
 ## Production notes / TODOs
 
 - Deploy to a public testnet (Amoy) using the documented env vars; then mainnet after an audit.
+  `npm run deploy:amoy -w contracts` writes `contracts/deployments/amoy.json` (including
+  `deploymentBlock`); point `DEPLOYMENT_FILE` at it and `RPC_URL` at an Amoy endpoint and the
+  hosted stack uses it as-is — it never starts a local chain or deploys in that mode.
+- **SQLite vs Postgres (issue #4 decision):** the demo persists issuer/relayer mirrors and
+  denial records in SQLite (`DB_FILE`, default `server/data/trialfence.db`). For production, swap
+  the `node:sqlite` driver in `server/src/db.ts` for `pg` — the schema (UNIQUE hmac/commitment/
+  leaf_index, additive migrations), the keyed-HMAC digest scheme and the startup reconciliation
+  from `MembershipIssued` events are backend-agnostic and carry over unchanged. Denial digests
+  and signatures verify identically regardless of store.
 - The relayer currently submits without fee tiers or rate limiting; add per-site quotas + nonce
   management before production.
 - The issuer should sit behind mTLS / a VPN between sponsor sites (not open like the demo).

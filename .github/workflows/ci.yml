@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (clean, from lockfile)
+        run: npm ci
+
+      - name: Repair zk native deps dropped by npm ci
+        run: node scripts/fix-zk-deps.mjs
+
+      - name: Compile contracts
+        run: npm run compile -w contracts
+
+      - name: Contract tests (real Groth16 proofs)
+        run: npm run test -w contracts
+
+      - name: Server typecheck
+        run: npx tsc --noEmit -p server
+
+      - name: Web production build
+        run: npm run build -w web
+
+      - name: Boot local stack
+        run: |
+          (npx hardhat node --port 8545 > /tmp/hardhat-node.log 2>&1 &) 
+          (cd contracts && sleep 12 && npx hardhat run scripts/deploy.ts --network localhost)
+          (npm run issuer -w server > /tmp/issuer.log 2>&1 &)
+          (npm run relayer -w server > /tmp/relayer.log 2>&1 &)
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:4001/health > /dev/null && curl -sf http://127.0.0.1:4002/health > /dev/null; then
+              echo "stack is up"; break
+            fi
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:4001/health
+          curl -sf http://127.0.0.1:4002/health
+
+      - name: HTTP end-to-end smoke test
+        run: node scripts/e2e.mjs
+
+      - name: Service logs on failure
+        if: failure()
+        run: |
+          echo "--- hardhat ---"; tail -50 /tmp/hardhat-node.log || true
+          echo "--- issuer ---"; tail -80 /tmp/issuer.log || true
+          echo "--- relayer ---"; tail -80 /tmp/relayer.log || true

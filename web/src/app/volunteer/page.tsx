@@ -161,11 +161,12 @@ export default function VolunteerPage() {
           </button>
         </div>
         <p className="hint">
-          Stored only in this browser. The trapdoor and nullifier are kept here; only the{" "}
-          <strong>commitment</strong> is ever shared — and even that is kept off-chain.
+          Stored only in this browser. Your private key never leaves this device; only the{" "}
+          <strong>commitment</strong> is ever shared — and commitments are public once the issuer
+          puts them on-chain.
         </p>
         <div className="stat">
-          <div className="label">Commitment (public, shared with issuer)</div>
+          <div className="label">Commitment (public once on-chain, shared with issuer)</div>
           <div className="value mono">{commitment}</div>
         </div>
         {isVerifiedMember ? (

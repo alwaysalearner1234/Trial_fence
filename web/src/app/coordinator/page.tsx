@@ -186,8 +186,9 @@ export default function CoordinatorPage() {
       <section className="card">
         <h2>Group members</h2>
         <p className="hint">
-          Commitments in the shared group (issuer-only view). The volunteer&apos;s trapdoor/nullifier are
-          never here.
+          Commitments in the shared group. Commitments are public on-chain data; what stays private:
+          identity secrets (on the volunteer&apos;s device only) and raw ID documents (the issuer
+          keeps a one-way HMAC digest only — never the document itself).
         </p>
         <table>
           <thead>

@@ -16,6 +16,14 @@ export function getDb(): DatabaseSync {
 }
 
 function migrate(database: DatabaseSync): void {
+  // Additive-only migrations so hosted audit data survives restarts/upgrades.
+  // (SQLite is the demo store; see README "Production notes" for the Postgres
+  // path. DB_FILE env selects the file location.)
+  try {
+    database.exec("ALTER TABLE denials ADD COLUMN digest TEXT");
+  } catch {
+    // Column already exists — created by the current schema below.
+  }
   database.exec(`
     CREATE TABLE IF NOT EXISTS identities (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,8 +42,9 @@ function migrate(database: DatabaseSync): void {
       issued_at TEXT NOT NULL
     );
 
-    -- Site-signed, PII-free denial records produced by the relayer whenever the
-    -- contract would revert an enrollment.
+    -- Relayer-signed, PII-free denial records produced by the relayer whenever
+    -- the contract would revert an enrollment. These are relayer audit records,
+    -- NOT site attestations: signer is always the relayer key.
     CREATE TABLE IF NOT EXISTS denials (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       protocol_id TEXT NOT NULL,

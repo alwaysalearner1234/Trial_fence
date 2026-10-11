@@ -41,6 +41,10 @@ async function main() {
     issuer: issuerAddress,
     owner: deployer.address,
     deployedAt: new Date().toISOString(),
+    // First block that can contain this deployment's events. Issuer startup
+    // reconciliation and relayer /events + monitor queries start here instead
+    // of scanning from genesis.
+    deploymentBlock: await ethers.provider.getBlockNumber(),
   };
 
   const outDir = path.join(__dirname, "..", "deployments");

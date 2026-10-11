@@ -89,6 +89,12 @@ describe("TrialFence", function () {
         trialFence.connect(relayer).registerSite(3n, "Rogue Site")
       ).to.be.revertedWithCustomError(trialFence, "TrialFence__NotOwner");
     });
+
+    it("only the owner can register protocols", async function () {
+      await expect(
+        trialFence.connect(relayer).registerProtocol(3n, "Rogue Protocol")
+      ).to.be.revertedWithCustomError(trialFence, "TrialFence__NotOwner");
+    });
   });
 
   describe("issuer boundary", function () {
@@ -196,6 +202,26 @@ describe("TrialFence", function () {
       ).to.be.revertedWithCustomError(trialFence, "TrialFence__InvalidProof");
     });
 
+    it("rejects an enrollment at an unregistered site, even with a valid proof", async function () {
+      const UNREGISTERED_SITE = 99n;
+      // A well-formed proof whose message is the unregistered site id.
+      const proof = await proofFor(alice, [alice.commitment, bob.commitment], UNREGISTERED_SITE, PROTOCOL_A);
+      expect(await verifyProof(proof)).to.equal(true);
+
+      await expect(
+        trialFence.connect(relayer).enroll(PROTOCOL_A, UNREGISTERED_SITE, proof)
+      ).to.be.revertedWithCustomError(trialFence, "TrialFence__SiteNotFound");
+    });
+
+    it("rejects proofs from a tree the chain has never seen", async function () {
+      const outsider = new Identity();
+      const foreignGroup = new Group([alice.commitment, bob.commitment, outsider.commitment]);
+      const proof = await generateProof(outsider, foreignGroup, SITE_1, scopeFor(PROTOCOL_A));
+      await expect(
+        trialFence.connect(relayer).enroll(PROTOCOL_A, SITE_1, proof)
+      ).to.be.revertedWithCustomError(trialFence, "TrialFence__MerkleTreeRootIsNotPartOfTheGroup");
+    });
+
     it("rejects an unknown protocol id", async function () {
       const proof = await proofFor(alice, [alice.commitment, bob.commitment], SITE_1, 99n);
       await expect(
@@ -233,6 +259,38 @@ describe("TrialFence", function () {
         .removeMembership(alice.commitment, proof.siblings.map(String));
 
       expect(await trialFence.hasMember(1n, alice.commitment)).to.equal(false);
+    });
+
+    it("accepts an in-flight pre-revocation proof inside the grace window", async function () {
+      // Bob's proof is generated against the current (pre-revocation) root.
+      const proof = await proofFor(bob, [alice.commitment, bob.commitment], SITE_1, PROTOCOL_A);
+
+      // Alice's device is revoked, replacing the Merkle root.
+      const revokeProof = await group.generateMerkleProof(0);
+      await trialFence
+        .connect(issuer)
+        .removeMembership(alice.commitment, revokeProof.siblings.map(String));
+      expect(await trialFence.hasMember(1n, alice.commitment)).to.equal(false);
+
+      // The pre-revocation proof is still inside the acceptance window.
+      const tx = await trialFence.connect(relayer).enroll(PROTOCOL_A, SITE_1, proof);
+      expect((await tx.wait()).status).to.equal(1);
+    });
+
+    it("rejects the pre-revocation proof after the grace window expires", async function () {
+      const proof = await proofFor(bob, [alice.commitment, bob.commitment], SITE_2, PROTOCOL_A);
+
+      const revokeProof = await group.generateMerkleProof(0);
+      await trialFence
+        .connect(issuer)
+        .removeMembership(alice.commitment, revokeProof.siblings.map(String));
+
+      await network.provider.send("evm_increaseTime", [3600]);
+      await network.provider.send("evm_mine");
+
+      await expect(
+        trialFence.connect(relayer).enroll(PROTOCOL_A, SITE_2, proof)
+      ).to.be.revertedWithCustomError(trialFence, "TrialFence__MerkleTreeRootIsExpired");
     });
   });
 });

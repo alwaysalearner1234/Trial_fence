@@ -76,7 +76,7 @@ export default function Home() {
           <tbody>
             <tr>
               <td>1. Identity</td>
-              <td>Browser generates a Semaphore identity (trapdoor + nullifier + commitment).</td>
+              <td>Browser generates a Semaphore identity: a private key stays on-device, only the commitment is shared.</td>
               <td>Only the volunteer</td>
             </tr>
             <tr>

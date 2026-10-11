@@ -1,13 +1,20 @@
 // Render entrypoint: boots the entire TrialFence stack inside ONE web-service
 // container so a free Render instance can serve the demo end-to-end.
 //
+// LOCAL MODE (default: RPC_URL is loopback + DEPLOYMENT_FILE is localhost.json):
 //   1. spawn a local Hardhat node (in-memory chain),
 //   2. deploy TrialFence.sol onto it (writes contracts/deployments/localhost.json),
 //   3. start the issuer (4001) and relayer (4002) services,
 //   4. serve the built Next.js app on $PORT.
 //
-// The chain + sqlite DB are ephemeral (reset on every container restart) —
-// fine for a demo; for persistence use a managed chain provider + Postgres.
+// HOSTED MODE (any other RPC_URL, e.g. Polygon Amoy, or a non-localhost
+// deployment file): the script NEVER starts a local chain and NEVER deploys.
+// It uses the configured deployment file as-is and fails fast if the file is
+// missing, so a hosted startup can never silently fall back to localhost.
+//
+// The local chain + sqlite DB are ephemeral (reset on every container
+// restart) — fine for a demo; for persistence use a managed chain provider +
+// Postgres (see README "Production notes").
 import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import fs from "node:fs";
@@ -15,7 +22,22 @@ import path from "node:path";
 
 const ROOT = process.cwd();
 const PORT = process.env.PORT ?? "3000";
-const DEPLOYMENT_FILE = path.join(ROOT, "contracts", "deployments", "localhost.json");
+const RPC_URL = process.env.RPC_URL ?? "http://127.0.0.1:8545";
+const DEPLOYMENT_FILE = path.isAbsolute(process.env.DEPLOYMENT_FILE ?? "")
+  ? process.env.DEPLOYMENT_FILE
+  : path.join(ROOT, process.env.DEPLOYMENT_FILE ?? path.join("contracts", "deployments", "localhost.json"));
+
+function isLoopbackRpc(url) {
+  try {
+    const host = new URL(url).hostname;
+    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+// Hosted unless BOTH the RPC and the deployment file are local.
+const hostedMode = !isLoopbackRpc(RPC_URL) || !DEPLOYMENT_FILE.endsWith("localhost.json");
 
 function isReachable(port, timeoutMs) {
   return new Promise((resolve) => {
@@ -50,26 +72,36 @@ function run(name, cmd, args, cwd) {
   return child;
 }
 
-const hardhatReady = await isReachable(8545, 30000);
-if (!hardhatReady) {
-  console.log("[render] starting local Hardhat node…");
-  run("hardhat-node", "npx", ["hardhat", "node"], path.join(ROOT, "contracts"));
-  const ready = await isReachable(8545, 60000);
-  if (!ready) {
-    console.error("[render] Hardhat node failed to start");
+if (hostedMode) {
+  console.log(`[render] HOSTED MODE: rpc=${RPC_URL} deployment=${DEPLOYMENT_FILE}`);
+  console.log("[render] will NOT start a local chain and will NOT deploy; using the configured deployment as-is.");
+  if (!fs.existsSync(DEPLOYMENT_FILE)) {
+    console.error(`[render] deployment file missing: ${DEPLOYMENT_FILE} (refusing to silently fall back to localhost)`);
     process.exit(1);
   }
-}
+} else {
+  console.log("[render] LOCAL EPHEMERAL DEMO MODE (in-memory chain, reset on restart)");
+  const hardhatReady = await isReachable(8545, 30000);
+  if (!hardhatReady) {
+    console.log("[render] starting local Hardhat node…");
+    run("hardhat-node", "npx", ["hardhat", "node"], path.join(ROOT, "contracts"));
+    const ready = await isReachable(8545, 60000);
+    if (!ready) {
+      console.error("[render] Hardhat node failed to start");
+      process.exit(1);
+    }
+  }
 
-console.log("[render] deploying TrialFence…");
-const deploy = spawnSync(
-  "npx",
-  ["hardhat", "run", "scripts/deploy.ts", "--network", "localhost"],
-  { cwd: path.join(ROOT, "contracts"), stdio: "inherit", env: process.env }
-);
-if (deploy.status !== 0 || !fs.existsSync(DEPLOYMENT_FILE)) {
-  console.error("[render] contract deployment failed");
-  process.exit(1);
+  console.log("[render] deploying TrialFence…");
+  const deploy = spawnSync(
+    "npx",
+    ["hardhat", "run", "scripts/deploy.ts", "--network", "localhost"],
+    { cwd: path.join(ROOT, "contracts"), stdio: "inherit", env: process.env }
+  );
+  if (deploy.status !== 0 || !fs.existsSync(DEPLOYMENT_FILE)) {
+    console.error("[render] contract deployment failed");
+    process.exit(1);
+  }
 }
 
 console.log("[render] starting issuer + relayer…");

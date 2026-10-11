@@ -164,6 +164,78 @@ const denial = denials.denials[0];
 
 const { json: mon } = await http(`${RELAYER}/monitor/summary`);
 check("monitor summary labeled", mon.observations.length > 0 && mon.observations[0].severity, mon.observations[0]?.message);
+check("monitor sources labeled (deterministic rules, explicit narrative source)", mon.sources?.rules === "deterministic" && (mon.sources?.narrative === "none" || String(mon.sources?.narrative).startsWith("llm:")), JSON.stringify(mon.sources));
+
+// 5. Robustness (issues #5, #6, #7)
+console.log("\n== Robustness ==");
+
+// #6: five concurrent registrations for the SAME document issue exactly one credential.
+{
+  const raids = await Promise.all(
+    Array.from({ length: 5 }, (_, i) => {
+      const dev = new Identity();
+      return http(`${ISSUER}/register`, "POST", {
+        commitment: dev.commitment.toString(),
+        testId: { docType: "passport", documentNumber: "RACE-424242", fullName: `Racer ${i}` },
+      });
+    })
+  );
+  const accepted = raids.filter((r) => r.status === 201);
+  const refused = raids.filter((r) => r.status === 409 && r.json.error === "DUPLICATE_IDENTITY");
+  check("concurrent same-document issuance yields exactly one credential", accepted.length === 1 && refused.length === 4, `201=${accepted.length} 409=${refused.length}`);
+}
+
+// #5: a well-formed proof for an UNREGISTERED site is rejected as SITE_NOT_FOUND.
+{
+  const bogus = new Group(members);
+  const proof = await generateProof(identity, bogus, 99n, scopeFor(P1));
+  const out = await http(`${RELAYER}/enroll`, "POST", {
+    protocolId: String(P1), siteId: String(99),
+    proof: { merkleTreeDepth: proof.merkleTreeDepth, merkleTreeRoot: proof.merkleTreeRoot.toString(),
+             message: proof.message.toString(), nullifier: proof.nullifier.toString(), scope: scopeFor(P1).toString(),
+             points: proof.points.map((p) => p.toString()) },
+  });
+  check("unregistered-site enrollment denied", out.json.accepted === false && out.json.reason === "SITE_NOT_FOUND", out.json.reason);
+}
+
+// #7: a fabricated request reusing a CONSUMED nullifier with garbage points is
+// INVALID_PROOF, not a verified DUPLICATE.
+{
+  const groupNow = new Group(await getMembers());
+  const consumed = (await http(`${RELAYER}/events`)).json.events[0].nullifier;
+  const scope = scopeFor(P1);
+  const fake = await generateProof(identity, groupNow, BigInt(S1), scope);
+  const out = await http(`${RELAYER}/enroll`, "POST", {
+    protocolId: String(P1), siteId: String(S1),
+    proof: { merkleTreeDepth: fake.merkleTreeDepth, merkleTreeRoot: fake.merkleTreeRoot.toString(),
+             message: BigInt(S1).toString(), nullifier: String(consumed), scope: scope.toString(),
+             points: Array.from({ length: 8 }, (_, i) => String(1000 + i)) },
+  });
+  check("fabricated consumed-nullifier request labeled INVALID_PROOF", out.json.accepted === false && out.json.reason === "INVALID_PROOF", `${out.json.reason} (verification=${out.json.verification})`);
+}
+
+// #7: tamper-evidence — modifying a denial field breaks signature recovery.
+{
+  const { json: all } = await http(`${RELAYER}/denials`);
+  const target = all.denials[all.denials.length - 1];
+  const verify = await http(`${RELAYER}/denials/${target.id}/verify`);
+  check("denial verify endpoint confirms intact record", verify.json.valid === true && verify.json.signerRole === "relayer", `signer ${verify.json.signer}`);
+  const tamperedDigest = solidityPackedKeccak256(
+    ["string", "string", "string", "string", "string", "string"],
+    ["TRIALFENCE_DENIAL_V1", String(target.protocol_id), String(target.site_id), String(target.nullifier ?? "0"), String(target.reason) + "-TAMPERED", String(target.created_at)]
+  );
+  const tamperedSigner = verifyMessage(tamperedDigest, target.signature).toLowerCase();
+  check("tampered denial field fails signature recovery", tamperedSigner !== String(target.signer).toLowerCase(), `recovered ${tamperedSigner}`);
+}
+
+// #4: event pagination + deployment-block start.
+{
+  const full = await http(`${RELAYER}/events`);
+  const page = await http(`${RELAYER}/events?limit=1&offset=0`);
+  check("events pagination works", page.json.events.length === 1 && page.json.count === full.json.count, `page=1 total=${page.json.count}`);
+  const future = await http(`${RELAYER}/events?fromBlock=999999999`);
+  check("events from future block are empty", future.json.events.length === 0 && future.json.count === 0, `count=${future.json.count}`);
+}
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED"}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -14,6 +14,9 @@ export interface DeploymentInfo {
   issuer: string;
   owner: string;
   deployedAt: string;
+  /** Block the TrialFence contract was deployed in (recorded by deploy.ts).
+   *  Absent in older deployment files — callers must fall back to block 0. */
+  deploymentBlock?: number;
 }
 
 export const config = {
@@ -50,6 +53,11 @@ export const config = {
 
   // Optional bearer token for the issuer API. Empty = dev mode (no auth).
   issuerApiKey: env("ISSUER_API_KEY", ""),
+
+  // Optional bearer token for the relayer's privileged registry routes
+  // (POST /protocol, POST /site — they spend the owner/relayer keys).
+  // Empty = dev mode (no auth). The public gate (POST /enroll, GETs) stays open.
+  relayerApiKey: env("RELAYER_API_KEY", ""),
 
   explorerUrl: env("EXPLORER_URL", ""),
 

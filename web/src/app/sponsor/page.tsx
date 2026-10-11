@@ -226,17 +226,18 @@ export default function SponsorPage() {
         <h2>Signed denial records</h2>
         <p className="hint">
           When a zk-proof is rejected on-chain, the relayer saves a signed, PII-free record so the sponsor
-          can audit refusal reasons without seeing any identity material.
+          can audit refusal reasons without seeing any identity material. Records are signed by the
+          relayer key — they are relayer audit records, not site attestations.
         </p>
         <table>
           <thead>
-            <tr>
-              <th>Protocol</th>
-              <th>Site</th>
-              <th>Reason</th>
-              <th>Signed by</th>
-              <th>Time</th>
-            </tr>
+              <tr>
+                <th>Protocol</th>
+                <th>Site</th>
+                <th>Reason</th>
+                <th>Signed by (relayer)</th>
+                <th>Time</th>
+              </tr>
           </thead>
           <tbody>
             {denials.map((d, i) => (
@@ -258,8 +259,8 @@ export default function SponsorPage() {
       <section className="card">
         <h2>AI integrity monitor</h2>
         <p className="hint">
-          Deterministic anomaly flags computed from public events + signed denials. If{" "}
-          <span className="mono">OPENAI_API_KEY</span> is set, an LLM narrative is added.
+          Rule-based anomaly flags computed from public events + signed denials (deterministic). If{" "}
+          <span className="mono">OPENAI_API_KEY</span> is set, an LLM narrative is added on top.
         </p>
         {monitor ? (
           <>
@@ -270,7 +271,7 @@ export default function SponsorPage() {
             ))}
             {monitor.report && (
               <div className="banner">
-                <strong>LLM narrative</strong>
+                <strong>LLM narrative (model-generated, only because OPENAI_API_KEY is set)</strong>
                 <p>{monitor.report}</p>
               </div>
             )}
