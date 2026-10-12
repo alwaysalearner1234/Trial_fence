@@ -2,7 +2,7 @@
 // Requires: hardhat node running, contract deployed (deployments/localhost.json),
 // issuer (4001) + relayer (4002) running. Run:  node scripts/e2e.mjs
 import { Identity, Group, generateProof } from "@semaphore-protocol/core";
-import { solidityPackedKeccak256, verifyMessage } from "ethers";
+import { solidityPackedKeccak256, keccak256, AbiCoder, verifyMessage } from "ethers";
 
 const ISSUER = process.env.ISSUER_URL ?? "http://127.0.0.1:4001";
 const RELAYER = process.env.RELAYER_URL ?? "http://127.0.0.1:4002";
@@ -222,11 +222,11 @@ console.log("\n== Robustness ==");
   const { json: all } = await http(`${RELAYER}/denials`);
   const target = all.denials[all.denials.length - 1];
   const verify = await http(`${RELAYER}/denials/${target.id}/verify`);
-  check("denial verify endpoint confirms intact record", verify.json.valid === true && verify.json.signerRole === "relayer", `signer ${verify.json.signer}`);
-  const tamperedDigest = solidityPackedKeccak256(
-    ["string", "string", "string", "string", "string", "string"],
-    ["TRIALFENCE_DENIAL_V1", String(target.protocol_id), String(target.site_id), String(target.nullifier ?? "0"), String(target.reason) + "-TAMPERED", String(target.created_at)]
-  );
+  check("denial verify endpoint confirms intact record", verify.json.valid === true && verify.json.trustedSigner === true && verify.json.digestVersion === "V2" && verify.json.signerRole === "relayer", `signer ${verify.json.signer}`);
+  const tamperedDigest = keccak256(AbiCoder.defaultAbiCoder().encode(
+    ["string", "uint256", "uint256", "uint256", "string", "string"],
+    ["TRIALFENCE_DENIAL_V2", String(target.protocol_id), String(target.site_id), String(target.nullifier ?? "0"), String(target.reason) + "-TAMPERED", String(target.created_at)]
+  ));
   const tamperedSigner = verifyMessage(tamperedDigest, target.signature).toLowerCase();
   check("tampered denial field fails signature recovery", tamperedSigner !== String(target.signer).toLowerCase(), `recovered ${tamperedSigner}`);
 }

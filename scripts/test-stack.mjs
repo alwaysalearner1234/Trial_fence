@@ -65,6 +65,30 @@ try {
   console.log("PASS  production Next proxy preserves authorization and public reads");
   await finish(start("e2e", [path.join(root, "scripts/e2e.mjs")], root, true));
 
+  // Use only the runner's temporary database to test stored-record tampering.
+  const { DatabaseSync } = await import("node:sqlite");
+  const { Wallet, AbiCoder, keccak256 } = await import("ethers");
+  const db = new DatabaseSync(env.DB_FILE);
+  const original = db.prepare("SELECT * FROM denials ORDER BY id LIMIT 1").get();
+  const digest = (protocol, site, nullifier, reason, time) => keccak256(AbiCoder.defaultAbiCoder().encode(
+    ["string", "uint256", "uint256", "uint256", "string", "string"],
+    ["TRIALFENCE_DENIAL_V2", protocol, site, nullifier, reason, time]));
+  if (digest("1", "23", "4", "DUPLICATE", original.created_at) === digest("12", "3", "4", "DUPLICATE", original.created_at)) throw new Error("Denial field boundaries collided.");
+  db.prepare("UPDATE denials SET reason = ? WHERE id = ?").run("TAMPERED", original.id);
+  const tamper = await (await fetch(`http://127.0.0.1:4002/denials/${original.id}/verify`)).json();
+  if (tamper.valid || tamper.digestMatches) throw new Error("Verifier accepted a changed stored field.");
+  const attacker = Wallet.createRandom();
+  const forgedDigest = digest(original.protocol_id, original.site_id, original.nullifier, original.reason, original.created_at);
+  const forgedSignature = await attacker.signMessage(forgedDigest);
+  db.prepare("UPDATE denials SET reason = ?, digest = ?, signature = ?, signer = ? WHERE id = ?").run(original.reason, forgedDigest, forgedSignature, attacker.address, original.id);
+  const forged = await (await fetch(`http://127.0.0.1:4002/denials/${original.id}/verify`)).json();
+  if (forged.valid || forged.trustedSigner || !forged.signerMatches) throw new Error("Verifier trusted an attacker-controlled signer.");
+  db.prepare("UPDATE denials SET reason = ?, digest = ?, signature = ?, signer = ? WHERE id = ?").run(original.reason, original.digest, original.signature, original.signer, original.id);
+  const intact = await (await fetch(`http://127.0.0.1:4002/denials/${original.id}/verify`)).json();
+  db.close();
+  if (!intact.valid) throw new Error("Verifier rejected restored intact record.");
+  console.log("PASS  typed denial fields resist boundary collisions; stored tampering and forged signers are rejected");
+
   const denialsBefore = (await (await fetch("http://127.0.0.1:4002/denials")).json()).denials.length;
   stop(node.child);
   await new Promise(resolve => setTimeout(resolve, 500));
