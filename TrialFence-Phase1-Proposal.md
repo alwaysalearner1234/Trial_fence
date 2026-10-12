@@ -22,14 +22,14 @@ HACKSPHERE 2026 · COMPSPHERE 12 · THEME: WEB3 INNOVATION — Phase 1: Idea Pro
 - **Country:** Pakistan
 - **Institution:** Hamdard University
 
-### Member 1 — Duddekuntla Lidiya
+### Member 1 — Duddekunta Lidiya
 - **Status:** Third-year B.Tech Artificial Intelligence and Data Science student
-- **Email:** duddekuntlalidiya@gmail.com
+- **Email:** duddekuntalidiya@gmail.com
 - **Country:** India
 - **Institution:** Dhanalakshmi Srinivasan University
 
 ### Member 2 — Krishna Kumar
-- **Status:** B.Tech Artificial Intelligence and Machine Learning student
+- **Status:** B.Tech in Computer Science - Artificial Intelligence student
 - **Email:** krishn.inbox404@gmail.com
 - **Country:** India
 - **Institution:** Government Engineering College, Munger
