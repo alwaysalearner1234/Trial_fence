@@ -10,13 +10,13 @@ const actors = [
   {
     href: "/coordinator",
     title: "I am a site coordinator",
-    body: "Verify a volunteer's physical ID against the central registry. Membership is granted, but your site never sees the anonymous identity that later proves enrollment.",
+    body: "Use fictional identity data to demonstrate a repeat-issuance check. The issuer sees the public commitment and adds it to the group; the participant secret stays on the device.",
     cta: "Verify & issue membership",
   },
   {
     href: "/sponsor",
     title: "I am the sponsor / IRB",
-    body: "Register protocols and sites, audit public enrollment and signed denial events on-chain, and read the AI anomaly summary — all fully de-identified.",
+    body: "Register protocols and sites, audit accepted enrollment events on-chain and relayer-signed denials off-chain, and review integrity flags.",
     cta: "Audit the registry",
   },
 ];
@@ -27,9 +27,9 @@ export default function Home() {
       <section className="card">
         <h2>Who is the gate for?</h2>
         <p className="hint">
-          A clinical trial participant cannot enroll in the same protocol at two sites without being detected —
-          while their identity stays mathematically hidden. The coordinator verifies physical ID documents;
-          only an unlinkable zk-proof ever reaches the chain.
+          The same verified identity can enroll once per protocol across participating sites.
+          This demo uses test identity data. Public commitments, proofs and protocol-scoped nullifiers
+          reach the chain; names and raw documents do not. The issuer remains a trusted boundary.
         </p>
         <div className="grid">
           <div className="stat">
@@ -76,23 +76,23 @@ export default function Home() {
           <tbody>
             <tr>
               <td>1. Identity</td>
-              <td>Browser generates a Semaphore identity: a private key stays on-device, only the commitment is shared.</td>
+              <td>Browser generates a Semaphore v4 identity secret and public commitment.</td>
               <td>Only the volunteer</td>
             </tr>
             <tr>
               <td>2. Verification</td>
-              <td>Coordinator checks a physical ID against the registry and adds the volunteer&apos;s commitment to the membership group.</td>
-              <td>Registry staff (raw ID doc)</td>
+              <td>Issuer checks test identifiers for repeat issuance and adds the public commitment to the group.</td>
+              <td>Issuer sees test input; group commitments are public.</td>
             </tr>
             <tr>
               <td>3. Proof</td>
-              <td>Browser builds a zk-proof: <em>“I am a member of the group, this protocol&apos;s scope, at this site”</em> — leaking nothing else.</td>
-              <td>Only the volunteer</td>
+              <td>Browser builds a membership proof bound to this protocol&apos;s scope and site.</td>
+              <td>Secret stays in browser; proof and public inputs go to the relayer.</td>
             </tr>
             <tr>
               <td>4. Enroll</td>
               <td>The relayer calls the smart contract. A duplicate nullifier is rejected; denials are signed.</td>
-              <td>Public, but only hashes</td>
+              <td>Accepted events are public; relayer-signed denials are off-chain.</td>
             </tr>
           </tbody>
         </table>
