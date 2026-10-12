@@ -109,3 +109,7 @@ browser/Amoy items remain open pending human-produced evidence.
 The test counts above are the original branch author's report, not GitHub CI evidence. No workflow runs were returned for `58f5238` when rechecked. The combined review has 22 passing genuine-proof contract tests, a clean npm install, a passing server typecheck and production website build. Its HTTP integration result is recorded in `PR10_REVIEW_2026-10-12.md` after execution.
 
 Reconciliation currently replays issuance events only. It does not rebuild revoked leaves, recreate lost HMAC identity records, or coordinate multiple issuer processes. Those remain acceptance gaps. Event output pagination slices results after one RPC query and does not bound the RPC block range. Postgres, site accounts, site-controlled signatures and a verified Amoy/browser demo remain pending. Do not close #3–#8 based on this document alone.
+
+### Denial verification hardening
+
+New denial records use V2 typed ABI encoding so field boundaries cannot collide. Verification requires the configured relayer address, rather than trusting an editable stored signer. The isolated integration test changes a stored field, forges an otherwise valid signature with a different wallet, restores the original record and checks the verifier responses. Older packed V1 records do not verify as V2 and need explicit legacy review; no audit rows are deleted or re-signed.
