@@ -23,7 +23,7 @@ function refuse(body: Response, status: number, code: string, detail: string) {
 }
 
 // Optional shared bearer token. Empty in dev mode.
-app.use("/", (req, res, next) => {
+app.post("/register", (req, res, next) => {
   if (!config.issuerApiKey) return next();
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
   if (token === config.issuerApiKey) return next();
@@ -54,16 +54,19 @@ app.get(
   "/status",
   wrap(async (_req, res) => {
     const contract = trialFenceContract(provider());
-    const [memberCount, root, groupId] = await Promise.all([
+    const [memberCount, root, groupId, chainIssuer] = await Promise.all([
       contract.memberCount(),
       contract.currentMerkleTreeRoot(),
       contract.GROUP_ID(),
+      contract.issuer(),
     ]);
     res.json({
       groupId: Number(groupId),
       memberCount: Number(memberCount),
       root: root.toString(),
       issuer: await issuerWallet().getAddress(),
+      trialFence: deployment().trialFence,
+      isIssuer: String(chainIssuer).toLowerCase() === issuerWallet().address.toLowerCase(),
       chainId: deployment().chainId,
       network: deployment().network,
     });
@@ -84,67 +87,74 @@ app.post(
   "/register",
   wrap(async (req, res) => {
     const body = req.body ?? {};
-    const commitment = String(body.commitment ?? "").trim();
-    const docType = String(body.testId?.docType ?? "")
-      .trim()
-      .toUpperCase();
+    const rawCommitment = String(body.commitment ?? "").trim();
+    const docType = ({ PASSPORT: "PASSPORT", NATIONALID: "NATIONAL-ID", DRIVERLICENSE: "DRIVER-LICENSE" } as Record<string, string>)[normalizeIdentifier(String(body.testId?.docType ?? ""))];
     const docNumber = String(body.testId?.documentNumber ?? "").trim();
 
-    if (!isBigIntString(commitment)) return refuse(res, 400, "BAD_REQUEST", "commitment must be an integer string");
-    if (!docType) return refuse(res, 400, "BAD_REQUEST", "testId.docType is required");
-    if (!docNumber) return refuse(res, 400, "BAD_REQUEST", "testId.documentNumber is required");
+    if (!isBigIntString(rawCommitment)) return refuse(res, 400, "BAD_REQUEST", "commitment must be an unsigned integer string");
+    const commitment = BigInt(rawCommitment).toString();
+    if (!docType) return refuse(res, 400, "BAD_REQUEST", "unsupported test document type");
+    if (!normalizeIdentifier(docNumber)) return refuse(res, 400, "BAD_REQUEST", "testId.documentNumber must contain letters or digits");
 
     const db = getDb();
+    // Hold the lock from uniqueness checks through chain confirmation and persistence.
+    // Locking only the transaction allowed two concurrent requests to pass deduplication.
+    await withWriteLock(async () => {
 
-    const existing = db.prepare("SELECT commitment FROM members WHERE commitment = ?").get(commitment);
-    if (existing) return refuse(res, 409, "ALREADY_MEMBER", "this commitment is already in the verified group");
+      const existing = db.prepare("SELECT commitment FROM members WHERE commitment = ?").get(commitment);
+      if (existing) return refuse(res, 409, "ALREADY_MEMBER", "this commitment is already in the verified group");
 
-    const normalized = normalizeIdentifier(`${docType}${docNumber}`);
-    const key = idKey(config.hmacSecret, docType, normalizeIdentifier(docNumber));
+      const key = idKey(config.hmacSecret, docType, normalizeIdentifier(docNumber));
 
-    const prior = db.prepare("SELECT hmac FROM identities WHERE hmac = ?").get(key);
-    if (prior) {
-      return refuse(
-        res,
-        409,
-        "DUPLICATE_IDENTITY",
-        "keyed digest of this identity document is already registered; a second verified credential for the same person is refused"
-      );
-    }
+      const prior = db.prepare("SELECT hmac FROM identities WHERE hmac = ?").get(key);
+      if (prior) {
+        return refuse(
+          res,
+          409,
+          "DUPLICATE_IDENTITY",
+          "keyed digest of this identity document is already registered; a second verified credential for the same person is refused"
+        );
+      }
 
-    const contract = trialFenceContract(issuerWallet());
-    const leafIndex = Number(await contract.memberCount());
+      const contract = trialFenceContract(issuerWallet());
+      const leafIndex = Number(await contract.memberCount());
 
-    // Pre-flight so a bad commitment returns a clean error without burning gas.
-    await contract.issueMembership.staticCall(commitment);
+      // Pre-flight so a bad commitment returns a clean error without burning gas.
+      await contract.issueMembership.staticCall(commitment);
 
-    const receipt = await withWriteLock(async () => {
       const nonce = await latestNonce(issuerWallet());
-      const tx = await contract.connect(issuerWallet()).issueMembership(commitment, { nonce });
-      return await tx.wait();
-    });
+      const tx = await contract.issueMembership(commitment, { nonce });
+      const receipt = await tx.wait();
 
-    db.prepare("INSERT INTO identities (doc_type, hmac, commitment, created_at) VALUES (?, ?, ?, ?)").run(
-      docType,
-      key,
-      commitment,
-      new Date().toISOString()
-    );
-    db.prepare("INSERT INTO members (leaf_index, commitment, issued_at) VALUES (?, ?, ?)").run(
-      leafIndex,
-      commitment,
-      new Date().toISOString()
-    );
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare("INSERT INTO identities (doc_type, hmac, commitment, created_at) VALUES (?, ?, ?, ?)").run(
+          docType,
+          key,
+          commitment,
+          new Date().toISOString()
+        );
+        db.prepare("INSERT INTO members (leaf_index, commitment, issued_at) VALUES (?, ?, ?)").run(
+          leafIndex,
+          commitment,
+          new Date().toISOString()
+        );
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
 
-    console.log(`Issued membership #${leafIndex} (tx ${receipt.hash})`);
+      console.log(`Issued membership #${leafIndex} (tx ${receipt.hash})`);
 
-    res.status(201).json({
-      status: "accepted",
-      commitment,
-      leafIndex,
-      txHash: receipt.hash,
-      explorerUrl: explorerTxUrl(receipt.hash),
-      note: "test verification only; not production identity document verification",
+      res.status(201).json({
+        status: "accepted",
+        commitment,
+        leafIndex,
+        txHash: receipt.hash,
+        explorerUrl: explorerTxUrl(receipt.hash),
+        note: "test verification only; not production identity document verification",
+      });
     });
   })
 );

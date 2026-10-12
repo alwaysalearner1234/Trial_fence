@@ -46,6 +46,7 @@ export default function SponsorPage() {
       setProtocols(pr.protocols);
       const mm = await getMonitorSummary();
       setMonitor(mm);
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -89,10 +90,12 @@ export default function SponsorPage() {
       else e.counts.denied += 1;
       byId.set(id, e);
     };
-    for (const ev of events) bump(ev.protocolId, true);
-    for (const d of denials) bump(d.protocol_id, false);
+    for (const ev of events) bump(String(ev.protocolId), true);
+    for (const d of denials) bump(String(d.protocol_id), false);
     for (const p of protocols) {
-      if (!byId.has(p.id)) byId.set(p.id, { name: p.name, counts: { accepted: 0, denied: 0 } });
+      const id = String(p.id);
+      const row = byId.get(id) ?? { counts: { accepted: 0, denied: 0 } };
+      byId.set(id, { ...row, name: p.name });
     }
     return [...byId.entries()].map(([id, v]) => ({ id, name: v.name, counts: v.counts }));
   };
@@ -109,7 +112,7 @@ export default function SponsorPage() {
     <div>
       <section className="card">
         <h2>Register a protocol</h2>
-        <p className="hint">Only the contract owner may register protocols &amp; sites.</p>
+        <p className="hint">Protocol registration is permissionless on-chain. Site registration uses the contract owner.</p>
         <div className="grid">
           <fieldset>
             <label>Protocol ID (uint256)</label>
@@ -182,9 +185,9 @@ export default function SponsorPage() {
                 </td>
                 <td>{e.blockNumber}</td>
                 <td>
-                  <a href={e.explorerUrl} target="_blank" rel="noreferrer">
+                  {e.explorerUrl ? <a href={e.explorerUrl} target="_blank" rel="noreferrer">
                     {e.txHash.slice(0, 12)}…
-                  </a>
+                  </a> : <span className="mono">{e.txHash.slice(0, 12)}… (local receipt)</span>}
                 </td>
               </tr>
             ))}
@@ -222,10 +225,10 @@ export default function SponsorPage() {
       </section>
 
       <section className="card">
-        <h2>Signed denial records</h2>
+        <h2>Relayer-signed denial records (off-chain)</h2>
         <p className="hint">
-          When a zk-proof is rejected on-chain, the relayer saves a signed, PII-free record so the sponsor
-          can audit refusal reasons without seeing any identity material.
+          When a contract preflight rejects a proof, the relayer saves a signed record off-chain.
+          These are relayer attestations, not site signatures or persisted blockchain rejection events.
         </p>
         <table>
           <thead>

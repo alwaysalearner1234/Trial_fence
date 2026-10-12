@@ -50,6 +50,8 @@ contract TrialFence is SemaphoreGroups {
     error TrialFence__ProtocolAlreadyExists(uint256 protocolId);
     error TrialFence__ProtocolNotFound(uint256 protocolId);
     error TrialFence__SiteAlreadyRegistered(uint256 siteId);
+    error TrialFence__SiteNotRegistered(uint256 siteId);
+    error TrialFence__EmptySiteName();
     error TrialFence__WrongScope(uint256 expected, uint256 provided);
     error TrialFence__SiteMismatch(uint256 expected, uint256 provided);
     error TrialFence__DuplicateEnrollment(uint256 protocolId, uint256 nullifier);
@@ -159,6 +161,7 @@ contract TrialFence is SemaphoreGroups {
 
     /// @notice Registers a participating trial site (governance-controlled).
     function registerSite(uint256 siteId, string calldata name) external onlyOwner {
+        if (bytes(name).length == 0) revert TrialFence__EmptySiteName();
         if (bytes(sites[siteId]).length != 0) revert TrialFence__SiteAlreadyRegistered(siteId);
         sites[siteId] = name;
         emit SiteRegistered(siteId, name);
@@ -218,6 +221,7 @@ contract TrialFence is SemaphoreGroups {
     ) external {
         Protocol storage protocol = protocols[protocolId];
         if (!protocol.exists) revert TrialFence__ProtocolNotFound(protocolId);
+        if (bytes(sites[siteId]).length == 0) revert TrialFence__SiteNotRegistered(siteId);
 
         if (proof.scope != protocol.scope) {
             revert TrialFence__WrongScope(protocol.scope, proof.scope);

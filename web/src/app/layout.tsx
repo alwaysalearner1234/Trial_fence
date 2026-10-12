@@ -25,8 +25,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
         <main>{children}</main>
         <footer className="site">
-          TrialFence — no name, no document number ever leaves the coordinator. Enrollment is proven with a
-          Semaphore zero-knowledge proof bound to the protocol.
+          TrialFence demo - fictional identity data goes to the issuer only. Names and raw identifiers
+          are not stored on-chain. The identity secret stays on the participant device.
         </footer>
       </body>
     </html>
