@@ -43,8 +43,9 @@ function requireRelayerKey(req: Request, res: Response, next: NextFunction): voi
 function isProofInput(value: unknown): value is ProofInput {
   const p = (value ?? {}) as Record<string, unknown>;
   return (
-    typeof p.merkleTreeDepth === "number" &&
-    typeof p.merkleTreeRoot === "string" &&
+    Number.isInteger(p.merkleTreeDepth) &&
+    Number(p.merkleTreeDepth) >= 1 && Number(p.merkleTreeDepth) <= 32 &&
+    isBigIntString(p.merkleTreeRoot) &&
     isBigIntString(p.message) &&
     isBigIntString(p.nullifier) &&
     isBigIntString(p.scope) &&
@@ -63,6 +64,7 @@ function isProofInput(value: unknown): value is ProofInput {
 function errorName(err: unknown): string {
   const message = String((err as Error)?.message ?? "");
   const name =
+    (err as { revert?: { name?: string } })?.revert?.name ??
     (err as { info?: { error?: { name?: string } } })?.info?.error?.name ??
     message.match(/reverted(?:\s*with\s*panic(?:\s*\w+)?)?\s*:\s*([A-Za-z_][\w$]+)/)?.[1];
   switch (name) {
@@ -74,6 +76,8 @@ function errorName(err: unknown): string {
       return "WRONG_SCOPE";
     case "TrialFence__SiteMismatch":
       return "SITE_MISMATCH";
+    case "TrialFence__SiteNotRegistered":
+      return "SITE_NOT_REGISTERED";
     case "TrialFence__InvalidProof":
       return "INVALID_PROOF";
     case "TrialFence__GroupHasNoMembers":
@@ -173,7 +177,8 @@ async function snarkValid(proof: ProofInput): Promise<boolean> {
       ],
       proof.merkleTreeDepth
     )) as boolean;
-  } catch {
+  } catch (error) {
+    if (isTransportError(error) || errorName(error) === "UNKNOWN") throw error;
     return false;
   }
 }
@@ -205,7 +210,8 @@ app.post(
     const expectedScope = scopeFor(protocolId);
     if (BigInt(proof.scope) !== expectedScope) {
       const record = await recordDenial(protocolId, siteId, "WRONG_SCOPE", proof.nullifier);
-      return res.json({ accepted: false, reason: "WRONG_SCOPE", denial: record });
+      return res.json({ status: "denied", accepted: false, reason: "WRONG_SCOPE", denial: record,
+        signedRecord: { message: record.digest, signature: record.signature, signer: record.signer } });
     }
 
     let receipt;
@@ -222,6 +228,8 @@ app.post(
       if (isTransportError(err)) {
         console.warn(`Enrollment RPC failure protocol=${protocolId} site=${siteId} (${String((err as Error)?.message ?? err).slice(0, 160)})`);
         return res.status(503).json({
+          status: "error",
+          error: "CHAIN_UNAVAILABLE",
           accepted: false,
           reason: "RPC_FAILURE",
           detail: "relayer could not reach the chain or decode a response; retry later",
@@ -232,6 +240,8 @@ app.post(
       if (!CLASSIFIED_REASONS.has(reason)) {
         console.warn(`Enrollment unclassified failure protocol=${protocolId} site=${siteId} (${String((err as Error)?.message ?? err).slice(0, 160)})`);
         return res.status(503).json({
+          status: "error",
+          error: "CHAIN_UNAVAILABLE",
           accepted: false,
           reason: "RPC_FAILURE",
           detail: "relayer could not classify the failure; retry later",
@@ -242,7 +252,11 @@ app.post(
         // a fabricated request reusing a consumed nullifier also reverts as
         // DUPLICATE. Re-check SNARK validity before reporting a *verified*
         // duplicate; otherwise label it INVALID_PROOF.
-        verification = (await snarkValid(proof)) ? "snark-valid" : "snark-invalid";
+        try {
+          verification = (await snarkValid(proof)) ? "snark-valid" : "snark-invalid";
+        } catch {
+          return res.status(503).json({ status: "error", error: "CHAIN_UNAVAILABLE", reason: "RPC_FAILURE", detail: "Proof verification could not be completed. Retry later." });
+        }
         if (verification === "snark-invalid") reason = "INVALID_PROOF";
       }
       const record = await recordDenial(protocolId, siteId, reason, proof.nullifier);
@@ -250,17 +264,22 @@ app.post(
         `Enrollment refused protocol=${protocolId} site=${siteId} reason=${reason} verification=${verification} (${(err as Error)?.message?.slice(0, 160)})`
       );
       return res.json({
+        status: "denied",
         accepted: false,
         reason,
         verification,
         denial: record,
+        signedRecord: { message: record.digest, signature: record.signature, signer: record.signer },
         detail: String((err as Error)?.message ?? err),
       });
     }
 
     console.log(`Accepted enrollment protocol=${protocolId} site=${siteId} tx=${receipt.hash}`);
     return res.json({
+      status: "accepted",
       accepted: true,
+      protocolId,
+      siteId,
       txHash: receipt.hash,
       blockNumber: receipt.blockNumber,
       nullifier: proof.nullifier,
@@ -377,7 +396,7 @@ app.post(
     if (!isBigIntString(protocolId)) return res.status(400).json({ error: "BAD_REQUEST", detail: "protocolId must be an integer string" });
     if (!name || name.length > 64) return res.status(400).json({ error: "BAD_REQUEST", detail: "name is required (<= 64 chars)" });
 
-    const contract = trialFenceContract(provider());
+    const contract = trialFenceContract(ownerWallet());
     const expectedScope = scopeFor(protocolId);
 
     await contract.registerProtocol.staticCall(protocolId, name);
@@ -524,11 +543,10 @@ app.get(
     res.json({
       network: deployment().network,
       chainId: deployment().chainId,
-      rpcUrl: config.rpcUrl,
       contractAddress: deployment().trialFence,
       abi: trialFenceAbi(),
       explorerUrl: config.explorerUrl,
-      issuerUrl: process.env.ISSUER_URL ?? "http://127.0.0.1:4001",
+      issuerUrl: "/api/issuer",
       groupId: 1,
     });
   })
