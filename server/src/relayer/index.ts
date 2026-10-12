@@ -4,7 +4,7 @@ import { config, deployment, explorerTxUrl, trialFenceAbi } from "../config";
 import { getDb } from "../db";
 import { ownerWallet, provider, relayerWallet, trialFenceContract } from "../chain";
 import { isBigIntString, scopeFor } from "../scope";
-import { solidityPackedKeccak256, verifyMessage, Contract } from "ethers";
+import { solidityPackedKeccak256, keccak256, AbiCoder, verifyMessage, Contract } from "ethers";
 import { monitorSummary } from "../monitor";
 import { latestNonce, withWriteLock } from "../chain";
 
@@ -295,6 +295,14 @@ app.post(
  * audit record, not a site attestation. The signature lets any auditor verify
  * the record was produced by the relayer.
  */
+function denialDigest(protocolId: string, siteId: string, nullifier: string, reason: string, createdAt: string): string {
+  // Typed ABI encoding preserves field boundaries; packed strings did not.
+  return keccak256(AbiCoder.defaultAbiCoder().encode(
+    ["string", "uint256", "uint256", "uint256", "string", "string"],
+    ["TRIALFENCE_DENIAL_V2", protocolId, siteId, nullifier, reason, createdAt]
+  ));
+}
+
 async function recordDenial(
   protocolId: string,
   siteId: string,
@@ -305,10 +313,7 @@ async function recordDenial(
   const signerAddress = await signer.getAddress();
   const createdAt = new Date().toISOString();
 
-  const digest = solidityPackedKeccak256(
-    ["string", "string", "string", "string", "string", "string"],
-    ["TRIALFENCE_DENIAL_V1", protocolId, siteId, nullifier ?? "0", reason, createdAt]
-  );
+  const digest = denialDigest(protocolId, siteId, nullifier ?? "0", reason, createdAt);
   const signature = await signer.signMessage(digest);
 
   getDb()
@@ -348,29 +353,27 @@ app.get(
       | undefined;
     if (!row) return res.status(404).json({ error: "NOT_FOUND" });
 
-    const recomputed = solidityPackedKeccak256(
-      ["string", "string", "string", "string", "string", "string"],
-      [
-        "TRIALFENCE_DENIAL_V1",
-        String(row.protocol_id),
-        String(row.site_id),
-        row.nullifier == null ? "0" : String(row.nullifier),
-        String(row.reason),
-        String(row.created_at),
-      ]
-    );
+    let recomputed: string | null = null;
+    try {
+      recomputed = denialDigest(String(row.protocol_id), String(row.site_id), row.nullifier == null ? "0" : String(row.nullifier), String(row.reason), String(row.created_at));
+    } catch { /* A malformed stored record cannot be verified. */ }
     let recovered: string | null = null;
     try {
-      recovered = verifyMessage(recomputed, String(row.signature));
+      if (recomputed) recovered = verifyMessage(recomputed, String(row.signature));
     } catch {
       recovered = null;
     }
     const digestMatches = recomputed === String(row.digest);
     const signerMatches =
       recovered !== null && recovered.toLowerCase() === String(row.signer).toLowerCase();
+    const expectedSigner = relayerWallet().address;
+    const trustedSigner = String(row.signer).toLowerCase() === expectedSigner.toLowerCase();
     res.json({
       id: row.id,
-      valid: digestMatches && signerMatches,
+      valid: digestMatches && signerMatches && trustedSigner,
+      digestVersion: "V2",
+      expectedSigner,
+      trustedSigner,
       digestMatches,
       signerMatches,
       signer: row.signer,
