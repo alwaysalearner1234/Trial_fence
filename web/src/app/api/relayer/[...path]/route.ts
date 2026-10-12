@@ -16,13 +16,17 @@ async function proxy(req: Request, trailing: string[]): Promise<Response> {
       : await req.arrayBuffer();
   }
 
-  const upstream = await fetch(target, init);
+  try {
+  const upstream = await fetch(target, { ...init, signal: AbortSignal.timeout(15000) });
   return new Response(await upstream.text(), {
     status: upstream.status,
     headers: {
       "content-type": upstream.headers.get("content-type") ?? "application/json",
     },
   });
+  } catch {
+    return Response.json({ error: "SERVICE_UNAVAILABLE", detail: "The service could not be reached. Please retry shortly." }, { status: 503 });
+  }
 }
 
 export async function GET(req: Request, ctx: { params: Promise<{ path: string[] }> }) {
