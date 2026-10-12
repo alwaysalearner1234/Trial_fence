@@ -62,7 +62,7 @@ export async function monitorSummary(): Promise<{
     if (totals.denied >= 2) {
       observations.push({
         severity: "warning",
-        message: `Protocol ${protocol}: ${totals.denied} denied attempt(s) blocked. Possible repeat participant or targeted re-enrollment pressure.`,
+        message: `Protocol ${protocol}: ${totals.denied} denied attempt(s). Review individual reasons; these can include duplicates, invalid proofs or configuration mistakes.`,
       });
     }
   }
@@ -74,7 +74,7 @@ export async function monitorSummary(): Promise<{
         severity: "alert",
         message: `Site ${site}: ${totals.denied}/${total} attempts denied (${Math.round(
           (totals.denied / total) * 100
-        )}%). High duplicate-rejection rate warrants coordinator review.`,
+        )}%). High denial rate warrants coordinator review; not every denial is a duplicate.`,
       });
     }
   }

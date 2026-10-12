@@ -1,6 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
 
+const repoRoot = path.resolve(__dirname, "..", "..");
+const envFile = path.join(repoRoot, ".env");
+if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
+const configPath = (key: string, fallback: string) => path.resolve(repoRoot, env(key, fallback));
+
 function env(key: string, fallback: string): string {
   return process.env[key] ?? fallback;
 }
@@ -25,15 +30,15 @@ export const config = {
   issuerPort: Number(env("PORT_ISSUER", "4001")),
   relayerPort: Number(env("PORT_RELAYER", "4002")),
 
-  deploymentFile: env(
+  deploymentFile: configPath(
     "DEPLOYMENT_FILE",
     path.join(__dirname, "..", "..", "contracts", "deployments", "localhost.json")
   ),
-  trialFenceArtifact: env(
+  trialFenceArtifact: configPath(
     "TRIALFENCE_ARTIFACT",
     path.join(__dirname, "..", "..", "contracts", "artifacts", "contracts", "TrialFence.sol", "TrialFence.json")
   ),
-  dbFile: env("DB_FILE", path.join(__dirname, "..", "data", "trialfence.db")),
+  dbFile: configPath("DB_FILE", "server/data/trialfence.db"),
 
   // Hardhat default test accounts. NEVER use these on a public network.
   issuerPrivateKey: env(
@@ -68,7 +73,16 @@ export const config = {
 
 export function deployment(): DeploymentInfo {
   const raw = fs.readFileSync(config.deploymentFile, "utf8");
-  return JSON.parse(raw) as DeploymentInfo;
+  const info = JSON.parse(raw) as DeploymentInfo;
+  if (info.chainId !== 31337) {
+    for (const key of ["OWNER_PRIVATE_KEY", "ISSUER_PRIVATE_KEY", "RELAYER_PRIVATE_KEY", "HMAC_SECRET", "ISSUER_API_KEY", "RELAYER_API_KEY"]) {
+      if (!process.env[key]?.trim()) throw new Error(`Set ${key} for a public testnet deployment.`);
+    }
+    if (config.hmacSecret === "trialfence-dev-hmac-secret-do-not-use-in-production") throw new Error("Use a dedicated HMAC_SECRET for a public testnet deployment.");
+    const devKeys = ["0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d", "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"];
+    if ([config.ownerPrivateKey, config.issuerPrivateKey, config.relayerPrivateKey].some(key => devKeys.includes(key.toLowerCase()))) throw new Error("Hardhat development keys must not be used on a public network.");
+  }
+  return info;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
