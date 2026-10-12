@@ -1,5 +1,10 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
+import * as fs from "fs";
+import * as path from "path";
+
+const envFile = path.resolve(__dirname, "..", ".env");
+if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
 
 const AMOY_RPC_URL = process.env.AMOY_RPC_URL ?? "https://rpc-amoy.polygon.technology";
 const DEPLOYER_PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY ?? "";
