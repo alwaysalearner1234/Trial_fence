@@ -122,6 +122,12 @@ describe("TrialFence", function () {
   });
 
   describe("enrollment gate", function () {
+    it("rejects enrollment at a site that the owner has not registered", async function () {
+      const proof = await proofFor(alice, [alice.commitment, bob.commitment], 999n, PROTOCOL_A);
+      await expect(trialFence.connect(relayer).enroll(PROTOCOL_A, 999n, proof))
+        .to.be.revertedWithCustomError(trialFence, "TrialFence__SiteNotFound");
+    });
+
     it("accepts a first enrollment and emits EnrollmentAccepted", async function () {
       const proof = await proofFor(alice, [alice.commitment, bob.commitment], SITE_1, PROTOCOL_A);
 
