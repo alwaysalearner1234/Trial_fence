@@ -15,12 +15,19 @@
 // The local chain + sqlite DB are ephemeral (reset on every container
 // restart) — fine for a demo; for persistence use a managed chain provider +
 // Postgres (see README "Production notes").
+import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 
-const ROOT = process.cwd();
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const envFile = path.join(ROOT, ".env");
+if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
+const issuerPort = process.env.PORT_ISSUER ?? "4001";
+const relayerPort = process.env.PORT_RELAYER ?? "4002";
+process.env.ISSUER_INTERNAL_URL ??= `http://127.0.0.1:${issuerPort}`;
+process.env.RELAYER_INTERNAL_URL ??= `http://127.0.0.1:${relayerPort}`;
 const PORT = process.env.PORT ?? "3000";
 const RPC_URL = process.env.RPC_URL ?? "http://127.0.0.1:8545";
 const DEPLOYMENT_FILE = path.isAbsolute(process.env.DEPLOYMENT_FILE ?? "")
@@ -30,7 +37,7 @@ const DEPLOYMENT_FILE = path.isAbsolute(process.env.DEPLOYMENT_FILE ?? "")
 function isLoopbackRpc(url) {
   try {
     const host = new URL(url).hostname;
-    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+    return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
   } catch {
     return false;
   }
@@ -60,35 +67,50 @@ function isReachable(port, timeoutMs) {
   });
 }
 
+const children = [];
+let stopping = false;
+function shutdown(code) {
+  if (stopping) return;
+  stopping = true;
+  for (const child of children) {
+    try { process.platform === "win32" ? child.kill("SIGTERM") : process.kill(-child.pid, "SIGTERM"); } catch {}
+  }
+  process.exit(code);
+}
+process.on("SIGTERM", () => shutdown(0));
+process.on("SIGINT", () => shutdown(0));
+
 function run(name, cmd, args, cwd) {
   const child = spawn(cmd, args, {
     cwd,
+    detached: process.platform !== "win32",
     stdio: "inherit",
     env: process.env,
     shell: process.platform === "win32",
   });
-  child.on("error", (err) => console.error(`[${name}] error:`, err.message));
-  child.on("exit", (code) => console.error(`[${name}] exited with code ${code}`));
+  children.push(child);
+  child.on("error", (err) => { console.error(`[${name}] could not start:`, err.message); shutdown(1); });
+  child.on("exit", (code) => { if (!stopping) { console.error(`[${name}] exited with code ${code}`); shutdown(code || 1); } });
   return child;
 }
 
 if (hostedMode) {
-  console.log(`[render] HOSTED MODE: rpc=${RPC_URL} deployment=${DEPLOYMENT_FILE}`);
+  console.log(`[render] HOSTED MODE: rpcHost=${new URL(RPC_URL).host} deployment=${DEPLOYMENT_FILE}`);
   console.log("[render] will NOT start a local chain and will NOT deploy; using the configured deployment as-is.");
   if (!fs.existsSync(DEPLOYMENT_FILE)) {
     console.error(`[render] deployment file missing: ${DEPLOYMENT_FILE} (refusing to silently fall back to localhost)`);
-    process.exit(1);
+    shutdown(1);
   }
 } else {
   console.log("[render] LOCAL EPHEMERAL DEMO MODE (in-memory chain, reset on restart)");
-  const hardhatReady = await isReachable(8545, 30000);
+  const hardhatReady = await isReachable(8545, 1000);
   if (!hardhatReady) {
     console.log("[render] starting local Hardhat node…");
     run("hardhat-node", "npx", ["hardhat", "node"], path.join(ROOT, "contracts"));
     const ready = await isReachable(8545, 60000);
     if (!ready) {
       console.error("[render] Hardhat node failed to start");
-      process.exit(1);
+      shutdown(1);
     }
   }
 
@@ -100,19 +122,18 @@ if (hostedMode) {
   );
   if (deploy.status !== 0 || !fs.existsSync(DEPLOYMENT_FILE)) {
     console.error("[render] contract deployment failed");
-    process.exit(1);
+    shutdown(1);
   }
 }
 
 console.log("[render] starting issuer + relayer…");
 run("issuer", "npm", ["run", "issuer", "-w", "server"], ROOT);
 run("relayer", "npm", ["run", "relayer", "-w", "server"], ROOT);
-const [iReady, rReady] = await Promise.all([isReachable(4001, 60000), isReachable(4002, 60000)]);
+const [iReady, rReady] = await Promise.all([isReachable(issuerPort, 60000), isReachable(relayerPort, 60000)]);
 if (!iReady || !rReady) {
   console.error("[render] issuer/relayer failed to start", { iReady, rReady });
-  process.exit(1);
+  shutdown(1);
 }
 
 console.log(`[render] serving web on :${PORT}`);
 const web = run("web", "npm", ["run", "start", "-w", "web", "--", "-p", PORT], ROOT);
-web.on("exit", (code) => process.exit(code ?? 0));
