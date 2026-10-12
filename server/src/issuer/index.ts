@@ -23,12 +23,12 @@ function refuse(body: Response, status: number, code: string, detail: string) {
 }
 
 // Optional shared bearer token. Empty in dev mode.
-app.use("/", (req, res, next) => {
+function requireIssuerKey(req: Request, res: Response, next: NextFunction) {
   if (!config.issuerApiKey) return next();
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
   if (token === config.issuerApiKey) return next();
-  return res.status(401).json({ error: "UNAUTHORIZED" });
-});
+  res.status(401).json({ error: "UNAUTHORIZED" });
+}
 
 /**
  * GET /members — public identity commitments in verified-group order, used by the
@@ -54,10 +54,11 @@ app.get(
   "/status",
   wrap(async (_req, res) => {
     const contract = trialFenceContract(provider());
-    const [memberCount, root, groupId] = await Promise.all([
+    const [memberCount, root, groupId, chainIssuer] = await Promise.all([
       contract.memberCount(),
       contract.currentMerkleTreeRoot(),
       contract.GROUP_ID(),
+      contract.issuer(),
     ]);
     res.json({
       groupId: Number(groupId),
@@ -65,6 +66,8 @@ app.get(
       root: root.toString(),
       issuer: await issuerWallet().getAddress(),
       contract: deployment().trialFence,
+      trialFence: deployment().trialFence,
+      isIssuer: String(chainIssuer).toLowerCase() === issuerWallet().address.toLowerCase(),
       chainId: deployment().chainId,
       network: deployment().network,
     });
@@ -99,17 +102,17 @@ app.get("/health", (_req, res) => {
  */
 app.post(
   "/register",
+  requireIssuerKey,
   wrap(async (req, res) => {
     const body = req.body ?? {};
-    const commitment = String(body.commitment ?? "").trim();
-    const docType = String(body.testId?.docType ?? "")
-      .trim()
-      .toUpperCase();
+    const rawCommitment = String(body.commitment ?? "").trim();
+    const docType = ({ PASSPORT: "PASSPORT", NATIONALID: "NATIONAL-ID", DRIVERLICENSE: "DRIVER-LICENSE" } as Record<string, string>)[normalizeIdentifier(String(body.testId?.docType ?? ""))];
     const docNumber = String(body.testId?.documentNumber ?? "").trim();
 
-    if (!isBigIntString(commitment)) return refuse(res, 400, "BAD_REQUEST", "commitment must be an integer string");
-    if (!docType) return refuse(res, 400, "BAD_REQUEST", "testId.docType is required");
-    if (!docNumber) return refuse(res, 400, "BAD_REQUEST", "testId.documentNumber is required");
+    if (!isBigIntString(rawCommitment)) return refuse(res, 400, "BAD_REQUEST", "commitment must be an unsigned integer string");
+    const commitment = BigInt(rawCommitment).toString();
+    if (!docType) return refuse(res, 400, "BAD_REQUEST", "unsupported test document type");
+    if (!normalizeIdentifier(docNumber)) return refuse(res, 400, "BAD_REQUEST", "testId.documentNumber must contain letters or digits");
 
     const normalized = normalizeIdentifier(docNumber);
     const key = idKey(config.hmacSecret, docType, normalized);
@@ -190,12 +193,19 @@ function persistMembership(
   leafIndex: number
 ): void {
   const now = new Date().toISOString();
+  db.exec("BEGIN IMMEDIATE");
+  try {
   db.prepare(
     "INSERT INTO identities (doc_type, hmac, commitment, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(hmac) DO NOTHING"
   ).run(docType, key, commitment, now);
   db.prepare(
     "INSERT INTO members (leaf_index, commitment, issued_at) VALUES (?, ?, ?) ON CONFLICT(leaf_index) DO NOTHING"
   ).run(leafIndex, commitment, now);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 /**
