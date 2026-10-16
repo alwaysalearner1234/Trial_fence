@@ -5,11 +5,13 @@ import * as path from "path";
 async function main() {
   const [deployer, issuer] = await ethers.getSigners();
 
+  if (!deployer) throw new Error("Set DEPLOYER_PRIVATE_KEY for this network.");
+  const issuerAddress = process.env.ISSUER_ADDRESS ?? (network.name === "localhost" || network.name === "hardhat" ? issuer?.address : undefined);
+  if (!issuerAddress || !ethers.isAddress(issuerAddress)) throw new Error("Set a valid ISSUER_ADDRESS before public testnet deployment.");
+
   console.log(`Network:  ${network.name}`);
   console.log(`Deployer: ${deployer.address}`);
-  console.log(`Issuer:   ${process.env.ISSUER_ADDRESS ?? issuer.address}`);
-
-  const issuerAddress = process.env.ISSUER_ADDRESS ?? issuer.address;
+  console.log(`Issuer:   ${issuerAddress}`);
 
   const Verifier = await ethers.getContractFactory("SemaphoreVerifier");
   const verifier = await Verifier.deploy();
@@ -41,6 +43,10 @@ async function main() {
     issuer: issuerAddress,
     owner: deployer.address,
     deployedAt: new Date().toISOString(),
+    // First block that can contain this deployment's events. Issuer startup
+    // reconciliation and relayer /events + monitor queries start here instead
+    // of scanning from genesis.
+    deploymentBlock: await ethers.provider.getBlockNumber(),
   };
 
   const outDir = path.join(__dirname, "..", "deployments");

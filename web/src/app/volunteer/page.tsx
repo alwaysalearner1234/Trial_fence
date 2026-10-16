@@ -101,8 +101,12 @@ export default function VolunteerPage() {
     setResult(null);
     setProofBrief(null);
     try {
+      const latest = await getMembers();
+      const currentGroup = new Group(latest.members.map(m => BigInt(m.commitment)));
+      setMembers(latest.members.map(m => m.commitment));
+      if (!currentGroup.members.includes(identity.commitment)) throw new Error("This identity is not in the current verified group.");
       const scope = scopeFor(BigInt(protocolId));
-      const proof = await generateProof(identity, group, BigInt(siteId), scope);
+      const proof = await generateProof(identity, currentGroup, BigInt(siteId), scope);
 
       setProofBrief(
         `root=${BigInt(proof.merkleTreeRoot).toString(16)}\nnullifier=${BigInt(proof.nullifier).toString(
@@ -153,6 +157,7 @@ export default function VolunteerPage() {
 
   return (
     <div>
+      <p className="banner">Demo network: {config.network} · chain {config.chainId} · contract <span className="mono">{config.contractAddress}</span></p>
       <section className="card">
         <div className="spread">
           <h2>1 · Your anonymous identity</h2>
@@ -161,11 +166,12 @@ export default function VolunteerPage() {
           </button>
         </div>
         <p className="hint">
-          Stored only in this browser. The trapdoor and nullifier are kept here; only the{" "}
-          <strong>commitment</strong> is ever shared — and even that is kept off-chain.
+          Your identity secret stays in this browser. The public <strong>commitment</strong> is shared
+          with the issuer and added to the on-chain group. Protocol-specific nullifiers are public
+          after enrollment; they are not your identity secret.
         </p>
         <div className="stat">
-          <div className="label">Commitment (public, shared with issuer)</div>
+          <div className="label">Commitment (public once on-chain, shared with issuer)</div>
           <div className="value mono">{commitment}</div>
         </div>
         {isVerifiedMember ? (
@@ -244,7 +250,7 @@ export default function VolunteerPage() {
         {step.id === "result" && result && (
           <>
             <div className={`banner ${step.ok ? "ok" : "error"}`}>
-              <strong>{step.ok ? "Enrollment accepted." : "Enrollment denied."}</strong>
+              <strong>{step.ok ? "Enrollment accepted." : result.status === "error" ? "Enrollment could not be completed." : "Enrollment denied."}</strong>
               {result.reason && <div>Reason: {result.reason}</div>}
               {result.staticCallError && <div>Rejection: {result.staticCallError}</div>}
               {result.signedRecord && (
@@ -257,18 +263,16 @@ export default function VolunteerPage() {
                 </pre>
               )}
             </div>
-            {result.txHash && config.explorerUrl && (
+            {result.txHash && (
               <p>
-                <a href={result.explorerUrl} target="_blank" rel="noreferrer">
+                {result.explorerUrl ? <a href={result.explorerUrl} target="_blank" rel="noreferrer">
                   View transaction on the explorer →
-                </a>
+                </a> : <span className="mono">Local transaction: {result.txHash}</span>}
               </p>
             )}
-            {step.ok === false && (
               <button onClick={runEnrollment} style={{ marginTop: 8 }}>
-                Try again (fresh proof, same identity)
+                {step.ok ? "Enroll at selected site (same identity)" : "Try again (fresh proof, same identity)"}
               </button>
-            )}
           </>
         )}
       </section>
@@ -277,8 +281,8 @@ export default function VolunteerPage() {
         <h2>Why the nullifier matters</h2>
         <p className="hint">
           The nullifier is derived from your secret and the protocol&apos;s scope. The contract stores it once
-          per protocol — a second attempt anywhere else in the network is denied even though the relayer
-          cannot link the two proofs to you.
+          per protocol. Repeat attempts for that protocol share a nullifier and can be linked to one
+          another, but the proof does not reveal which group commitment created them.
         </p>
       </section>
     </div>

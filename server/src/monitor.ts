@@ -1,4 +1,4 @@
-import { config, explorerTxUrl } from "./config";
+import { config, deployment, explorerTxUrl } from "./config";
 import { getDb } from "./db";
 import { provider, trialFenceContract } from "./chain";
 
@@ -28,6 +28,8 @@ export async function monitorSummary(): Promise<{
   generatedAt: string;
   observations: Observation[];
   report?: string;
+  /** Labels which output is deterministic (rules) vs model-generated (LLM). */
+  sources: { rules: "deterministic"; narrative: string };
   totals: Record<string, unknown>;
 }> {
   const db = getDb();
@@ -60,7 +62,7 @@ export async function monitorSummary(): Promise<{
     if (totals.denied >= 2) {
       observations.push({
         severity: "warning",
-        message: `Protocol ${protocol}: ${totals.denied} denied attempt(s) blocked. Possible repeat participant or targeted re-enrollment pressure.`,
+        message: `Protocol ${protocol}: ${totals.denied} denied attempt(s). Review individual reasons; these can include duplicates, invalid proofs or configuration mistakes.`,
       });
     }
   }
@@ -72,7 +74,7 @@ export async function monitorSummary(): Promise<{
         severity: "alert",
         message: `Site ${site}: ${totals.denied}/${total} attempts denied (${Math.round(
           (totals.denied / total) * 100
-        )}%). High duplicate-rejection rate warrants coordinator review.`,
+        )}%). High denial rate warrants coordinator review; not every denial is a duplicate.`,
       });
     }
   }
@@ -101,6 +103,7 @@ export async function monitorSummary(): Promise<{
   };
 
   let report: string | undefined;
+  const narrative = config.openaiApiKey ? `llm:${config.openaiModel}` : "none";
   if (config.openaiApiKey) {
     try {
       report = await llmNarrative(observations, totals);
@@ -109,12 +112,19 @@ export async function monitorSummary(): Promise<{
     }
   }
 
-  return { generatedAt: new Date().toISOString(), observations, report, totals };
+  return {
+    generatedAt: new Date().toISOString(),
+    observations,
+    report,
+    sources: { rules: "deterministic", narrative },
+    totals,
+  };
 }
 
 async function readEnrollmentEvents(): Promise<EnrollmentEvent[]> {
   const contract = trialFenceContract(provider());
-  const logs = await contract.queryFilter(contract.filters.EnrollmentAccepted(), 0);
+  const fromBlock = deployment().deploymentBlock ?? 0;
+  const logs = await contract.queryFilter(contract.filters.EnrollmentAccepted(), fromBlock);
   return (
     logs as Array<{
       args: { protocolId: string; siteId: string; nullifier: string; scope: string; relayer: string };

@@ -32,6 +32,7 @@ export default function SponsorPage() {
   const [monitor, setMonitor] = useState<MonitorData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [registryToken, setRegistryToken] = useState("");
   const [pId, setPId] = useState("");
   const [pName, setPName] = useState("");
   const [sId, setSId] = useState("");
@@ -46,6 +47,7 @@ export default function SponsorPage() {
       setProtocols(pr.protocols);
       const mm = await getMonitorSummary();
       setMonitor(mm);
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -58,7 +60,7 @@ export default function SponsorPage() {
   const submitProtocol = async () => {
     setMsg(null);
     try {
-      const res = await registerProtocol(pId, pName.trim() || `Protocol ${pId}`);
+      const res = await registerProtocol(pId, pName.trim() || `Protocol ${pId}`, registryToken);
       setMsg({ ok: true, text: `Protocol registered. tx: ${res.txHash}` });
       setPId("");
       setPName("");
@@ -71,7 +73,7 @@ export default function SponsorPage() {
   const submitSite = async () => {
     setMsg(null);
     try {
-      const res = await registerSite(sId, sName.trim() || `Site ${sId}`);
+      const res = await registerSite(sId, sName.trim() || `Site ${sId}`, registryToken);
       setMsg({ ok: true, text: `Site registered. tx: ${res.txHash}` });
       setSId("");
       setSName("");
@@ -89,10 +91,12 @@ export default function SponsorPage() {
       else e.counts.denied += 1;
       byId.set(id, e);
     };
-    for (const ev of events) bump(ev.protocolId, true);
-    for (const d of denials) bump(d.protocol_id, false);
+    for (const ev of events) bump(String(ev.protocolId), true);
+    for (const d of denials) bump(String(d.protocol_id), false);
     for (const p of protocols) {
-      if (!byId.has(p.id)) byId.set(p.id, { name: p.name, counts: { accepted: 0, denied: 0 } });
+      const id = String(p.id);
+      const row = byId.get(id) ?? { counts: { accepted: 0, denied: 0 } };
+      byId.set(id, { ...row, name: p.name });
     }
     return [...byId.entries()].map(([id, v]) => ({ id, name: v.name, counts: v.counts }));
   };
@@ -108,8 +112,14 @@ export default function SponsorPage() {
   return (
     <div>
       <section className="card">
+        <h2>Registry access</h2>
+        <p className="hint">Enter your registry token for protocol and site changes. It stays in this page's memory and is sent only with registry requests.</p>
+        <label htmlFor="registry-token">Registry token</label>
+        <input id="registry-token" type="password" value={registryToken} onChange={e => setRegistryToken(e.target.value)} autoComplete="off" />
+      </section>
+      <section className="card">
         <h2>Register a protocol</h2>
-        <p className="hint">Only the contract owner may register protocols &amp; sites.</p>
+        <p className="hint">Protocol and site registration use the contract owner and require a registry token when configured.</p>
         <div className="grid">
           <fieldset>
             <label>Protocol ID (uint256)</label>
@@ -182,9 +192,9 @@ export default function SponsorPage() {
                 </td>
                 <td>{e.blockNumber}</td>
                 <td>
-                  <a href={e.explorerUrl} target="_blank" rel="noreferrer">
+                  {e.explorerUrl ? <a href={e.explorerUrl} target="_blank" rel="noreferrer">
                     {e.txHash.slice(0, 12)}…
-                  </a>
+                  </a> : <span className="mono">{e.txHash.slice(0, 12)}… (local receipt)</span>}
                 </td>
               </tr>
             ))}
@@ -222,20 +232,20 @@ export default function SponsorPage() {
       </section>
 
       <section className="card">
-        <h2>Signed denial records</h2>
+        <h2>Relayer-signed denial records (off-chain)</h2>
         <p className="hint">
-          When a zk-proof is rejected on-chain, the relayer saves a signed, PII-free record so the sponsor
-          can audit refusal reasons without seeing any identity material.
+          When a contract preflight rejects a proof, the relayer saves a signed record off-chain.
+          These are relayer attestations, not site signatures or persisted blockchain rejection events.
         </p>
         <table>
           <thead>
-            <tr>
-              <th>Protocol</th>
-              <th>Site</th>
-              <th>Reason</th>
-              <th>Signed by</th>
-              <th>Time</th>
-            </tr>
+              <tr>
+                <th>Protocol</th>
+                <th>Site</th>
+                <th>Reason</th>
+                <th>Signed by (relayer)</th>
+                <th>Time</th>
+              </tr>
           </thead>
           <tbody>
             {denials.map((d, i) => (
@@ -257,8 +267,8 @@ export default function SponsorPage() {
       <section className="card">
         <h2>AI integrity monitor</h2>
         <p className="hint">
-          Deterministic anomaly flags computed from public events + signed denials. If{" "}
-          <span className="mono">OPENAI_API_KEY</span> is set, an LLM narrative is added.
+          Rule-based anomaly flags computed from public events + signed denials (deterministic). If{" "}
+          <span className="mono">OPENAI_API_KEY</span> is set, an LLM narrative is added on top.
         </p>
         {monitor ? (
           <>
@@ -269,7 +279,7 @@ export default function SponsorPage() {
             ))}
             {monitor.report && (
               <div className="banner">
-                <strong>LLM narrative</strong>
+                <strong>LLM narrative (model-generated, only because OPENAI_API_KEY is set)</strong>
                 <p>{monitor.report}</p>
               </div>
             )}

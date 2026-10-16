@@ -50,6 +50,8 @@ contract TrialFence is SemaphoreGroups {
     error TrialFence__ProtocolAlreadyExists(uint256 protocolId);
     error TrialFence__ProtocolNotFound(uint256 protocolId);
     error TrialFence__SiteAlreadyRegistered(uint256 siteId);
+    error TrialFence__SiteNotFound(uint256 siteId);
+    error TrialFence__EmptySiteName();
     error TrialFence__WrongScope(uint256 expected, uint256 provided);
     error TrialFence__SiteMismatch(uint256 expected, uint256 provided);
     error TrialFence__DuplicateEnrollment(uint256 protocolId, uint256 nullifier);
@@ -142,11 +144,15 @@ contract TrialFence is SemaphoreGroups {
     // ---------------------------------------------------------------------
 
     /// @notice Registers a study protocol and derives its unique enrollment scope.
+    /// @dev Governance-controlled: only the contract owner may register protocols,
+    ///      matching the sponsor dashboard ("Only the contract owner may register
+    ///      protocols & sites"). Sites are owner-governed as well.
     /// @param protocolId Sponsor-defined protocol id (unique).
     /// @param name Human-readable protocol name.
     /// @return scope The protocol-scoped nullifier domain for proofs.
     function registerProtocol(uint256 protocolId, string calldata name)
         external
+        onlyOwner
         returns (uint256 scope)
     {
         if (protocols[protocolId].exists) revert TrialFence__ProtocolAlreadyExists(protocolId);
@@ -159,6 +165,7 @@ contract TrialFence is SemaphoreGroups {
 
     /// @notice Registers a participating trial site (governance-controlled).
     function registerSite(uint256 siteId, string calldata name) external onlyOwner {
+        if (bytes(name).length == 0) revert TrialFence__EmptySiteName();
         if (bytes(sites[siteId]).length != 0) revert TrialFence__SiteAlreadyRegistered(siteId);
         sites[siteId] = name;
         emit SiteRegistered(siteId, name);
@@ -207,6 +214,8 @@ contract TrialFence is SemaphoreGroups {
     ///        scope = computeScope(protocolId) and message = siteId.
     ///
     /// Reverts with:
+    ///   - TrialFence__ProtocolNotFound if the protocol was never registered;
+    ///   - TrialFence__SiteNotFound if the site was never registered;
     ///   - TrialFence__DuplicateEnrollment if this participant already enrolled in the protocol;
     ///   - TrialFence__WrongScope if the proof was generated for another protocol;
     ///   - TrialFence__SiteMismatch if the proof message is not this site;
@@ -218,6 +227,8 @@ contract TrialFence is SemaphoreGroups {
     ) external {
         Protocol storage protocol = protocols[protocolId];
         if (!protocol.exists) revert TrialFence__ProtocolNotFound(protocolId);
+
+        if (bytes(sites[siteId]).length == 0) revert TrialFence__SiteNotFound(siteId);
 
         if (proof.scope != protocol.scope) {
             revert TrialFence__WrongScope(protocol.scope, proof.scope);

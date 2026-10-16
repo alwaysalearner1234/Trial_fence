@@ -2,7 +2,7 @@
 // Requires: hardhat node running, contract deployed (deployments/localhost.json),
 // issuer (4001) + relayer (4002) running. Run:  node scripts/e2e.mjs
 import { Identity, Group, generateProof } from "@semaphore-protocol/core";
-import { solidityPackedKeccak256, verifyMessage } from "ethers";
+import { solidityPackedKeccak256, keccak256, AbiCoder, verifyMessage } from "ethers";
 
 const ISSUER = process.env.ISSUER_URL ?? "http://127.0.0.1:4001";
 const RELAYER = process.env.RELAYER_URL ?? "http://127.0.0.1:4002";
@@ -21,7 +21,7 @@ const check = (label, cond, extra = "") => {
 async function http(url, method = "GET", body) {
   const res = await fetch(url, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(process.env.ISSUER_API_KEY && url.startsWith(ISSUER) && method === "POST" ? { Authorization: `Bearer ${process.env.ISSUER_API_KEY}` } : {}), ...(process.env.RELAYER_API_KEY && url.startsWith(RELAYER) && method === "POST" && !url.endsWith("/enroll") ? { Authorization: `Bearer ${process.env.RELAYER_API_KEY}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const json = await res.json();
@@ -73,6 +73,7 @@ const testId = { docType: "passport", documentNumber: "AB1234567", fullName: "Ja
 
 let { status, json } = await http(`${ISSUER}/register`, "POST", { commitment, testId });
 check("issuer accepts first registration", status === 201 && json.status === "accepted", `leaf ${json.leafIndex}`);
+check("issuer response contains a numeric index and transaction", typeof json.leafIndex === "number" && typeof json.txHash === "string");
 
 { const dup = await http(`${ISSUER}/register`, "POST", { commitment, testId }); // same commitment + same doc
   check("same credential (and same commitment) is refused (ALREADY_MEMBER)", dup.status === 409 && dup.json.error === "ALREADY_MEMBER", dup.json.detail); }
@@ -95,9 +96,11 @@ check("our commitment is a member", group.indexOf(BigInt(commitment)) >= 0);
 console.log("\n== Enrollment (relayer → on-chain) ==");
 let r = await enroll(identity, group, P1, S1);
 check("first enroll accepted", r.json.accepted === true, `tx ${r.json.txHash}`);
+check("accepted response matches the browser contract", r.json.status === "accepted");
 
 r = await enroll(identity, group, P1, S2);
 check("duplicate at second site denied", r.json.accepted === false && r.json.reason === "DUPLICATE", r.json.reason + (r.json.detail ? ` :: ${r.json.detail}` : ""));
+check("denied response includes the browser signed record", r.json.status === "denied" && Boolean(r.json.signedRecord?.signature));
 
 r = await enroll(identity, group, P2, S1);
 check("different protocol allowed", r.json.accepted === true, `tx ${r.json.txHash}`);
@@ -164,6 +167,95 @@ const denial = denials.denials[0];
 
 const { json: mon } = await http(`${RELAYER}/monitor/summary`);
 check("monitor summary labeled", mon.observations.length > 0 && mon.observations[0].severity, mon.observations[0]?.message);
+check("monitor sources labeled (deterministic rules, explicit narrative source)", mon.sources?.rules === "deterministic" && (mon.sources?.narrative === "none" || String(mon.sources?.narrative).startsWith("llm:")), JSON.stringify(mon.sources));
+
+// 5. Robustness (issues #5, #6, #7)
+console.log("\n== Robustness ==");
+
+// #6: five concurrent registrations for the SAME document issue exactly one credential.
+{
+  const raids = await Promise.all(
+    Array.from({ length: 5 }, (_, i) => {
+      const dev = new Identity();
+      return http(`${ISSUER}/register`, "POST", {
+        commitment: dev.commitment.toString(),
+        testId: { docType: "passport", documentNumber: "RACE-424242", fullName: `Racer ${i}` },
+      });
+    })
+  );
+  const accepted = raids.filter((r) => r.status === 201);
+  const refused = raids.filter((r) => r.status === 409 && r.json.error === "DUPLICATE_IDENTITY");
+  check("concurrent same-document issuance yields exactly one credential", accepted.length === 1 && refused.length === 4, `201=${accepted.length} 409=${refused.length}`);
+}
+
+// #5: a well-formed proof for an UNREGISTERED site is rejected as SITE_NOT_FOUND.
+{
+  const bogus = new Group(members);
+  const proof = await generateProof(identity, bogus, 99n, scopeFor(P1));
+  const out = await http(`${RELAYER}/enroll`, "POST", {
+    protocolId: String(P1), siteId: String(99),
+    proof: { merkleTreeDepth: proof.merkleTreeDepth, merkleTreeRoot: proof.merkleTreeRoot.toString(),
+             message: proof.message.toString(), nullifier: proof.nullifier.toString(), scope: scopeFor(P1).toString(),
+             points: proof.points.map((p) => p.toString()) },
+  });
+  check("unregistered-site enrollment denied", out.json.accepted === false && out.json.reason === "SITE_NOT_FOUND", out.json.reason);
+}
+
+// #7: a fabricated request reusing a CONSUMED nullifier with garbage points is
+// INVALID_PROOF, not a verified DUPLICATE.
+{
+  const groupNow = new Group(await getMembers());
+  const consumed = (await http(`${RELAYER}/events`)).json.events[0].nullifier;
+  const scope = scopeFor(P1);
+  const fake = await generateProof(identity, groupNow, BigInt(S1), scope);
+  const out = await http(`${RELAYER}/enroll`, "POST", {
+    protocolId: String(P1), siteId: String(S1),
+    proof: { merkleTreeDepth: fake.merkleTreeDepth, merkleTreeRoot: fake.merkleTreeRoot.toString(),
+             message: BigInt(S1).toString(), nullifier: String(consumed), scope: scope.toString(),
+             points: Array.from({ length: 8 }, (_, i) => String(1000 + i)) },
+  });
+  check("fabricated consumed-nullifier request labeled INVALID_PROOF", out.json.accepted === false && out.json.reason === "INVALID_PROOF", `${out.json.reason} (verification=${out.json.verification})`);
+}
+
+// #7: tamper-evidence — modifying a denial field breaks signature recovery.
+{
+  const { json: all } = await http(`${RELAYER}/denials`);
+  const target = all.denials[all.denials.length - 1];
+  const verify = await http(`${RELAYER}/denials/${target.id}/verify`);
+  check("denial verify endpoint confirms intact record", verify.json.valid === true && verify.json.trustedSigner === true && verify.json.digestVersion === "V2" && verify.json.signerRole === "relayer", `signer ${verify.json.signer}`);
+  const tamperedDigest = keccak256(AbiCoder.defaultAbiCoder().encode(
+    ["string", "uint256", "uint256", "uint256", "string", "string"],
+    ["TRIALFENCE_DENIAL_V2", String(target.protocol_id), String(target.site_id), String(target.nullifier ?? "0"), String(target.reason) + "-TAMPERED", String(target.created_at)]
+  ));
+  const tamperedSigner = verifyMessage(tamperedDigest, target.signature).toLowerCase();
+  check("tampered denial field fails signature recovery", tamperedSigner !== String(target.signer).toLowerCase(), `recovered ${tamperedSigner}`);
+}
+
+// #4: event pagination + deployment-block start.
+{
+  const full = await http(`${RELAYER}/events`);
+  const page = await http(`${RELAYER}/events?limit=1&offset=0`);
+  check("events pagination works", page.json.events.length === 1 && page.json.count === full.json.count, `page=1 total=${page.json.count}`);
+  const future = await http(`${RELAYER}/events?fromBlock=999999999`);
+  check("events from future block are empty", future.json.events.length === 0 && future.json.count === 0, `count=${future.json.count}`);
+}
+
+// Concurrent issuance used to pass both uniqueness checks before the write lock.
+console.log("\n== Concurrent issuer requests ==");
+const before = (await getMembers()).length;
+const pair = [new Identity(), new Identity()];
+const sameDocument = { docType: "national-id", documentNumber: "RACE-123", fullName: "Test Only" };
+const race = await Promise.all(pair.map(id => http(`${ISSUER}/register`, "POST", { commitment: id.commitment.toString(), testId: sameDocument })));
+check("same document issued once under concurrent requests", race.filter(r => r.status === 201).length === 1 && race.filter(r => r.status === 409 && r.json.error === "DUPLICATE_IDENTITY").length === 1);
+const different = await Promise.all(["RACE-A", "RACE-B"].map(documentNumber => http(`${ISSUER}/register`, "POST", { commitment: new Identity().commitment.toString(), testId: { ...sameDocument, documentNumber } })));
+check("different concurrent documents receive distinct leaf indices", different.every(r => r.status === 201) && new Set(different.map(r => r.json.leafIndex)).size === 2);
+const finalMembers = await getMembers();
+const statusResult = await http(`${ISSUER}/status`);
+check("issuer mirror remains complete and ordered", finalMembers.length === before + 3 && new Group(finalMembers).root.toString() === statusResult.json.root);
+check("issuer status exposes actual contract and issuer role", typeof statusResult.json.trialFence === "string" && statusResult.json.isIssuer === true);
+
+const malformed = await http(`${RELAYER}/enroll`, "POST", { protocolId: "-1", siteId: "1", proof: {} });
+check("negative protocol ID is rejected before RPC", malformed.status === 400);
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED"}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -2,6 +2,9 @@
   "name": "trialfence",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "description": "TrialFence — privacy-preserving duplicate-enrollment gate for multi-site clinical trials",
   "workspaces": [
     "contracts",
@@ -9,6 +12,7 @@
     "web"
   ],
   "scripts": {
+    "test:integration": "node scripts/test-stack.mjs",
     "compile": "npm run compile -w contracts",
     "test": "npm run test -w contracts",
     "node": "npm run node -w contracts",
@@ -16,6 +20,10 @@
     "deploy:amoy": "npm run deploy:amoy -w contracts",
     "issuer": "npm run issuer -w server",
     "relayer": "npm run relayer -w server",
-    "web": "npm run dev -w web"
+    "web": "npm run dev -w web",
+    "start:render": "node scripts/render-start.mjs"
+  },
+  "devDependencies": {
+    "wasmcurves": "^0.2.2"
   }
 }

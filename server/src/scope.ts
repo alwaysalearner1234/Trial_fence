@@ -41,8 +41,8 @@ export function idKey(secret: string, docType: string, normalizedIdentifier: str
 export function isBigIntString(value: unknown): value is string {
   if (typeof value !== "string" || value.trim() === "") return false;
   try {
-    BigInt(value.trim());
-    return true;
+    const parsed = BigInt(value.trim());
+    return parsed >= 0n && parsed < (1n << 256n);
   } catch {
     return false;
   }
