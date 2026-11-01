@@ -15,6 +15,16 @@ import {
   type SiteConfig,
 } from "../../lib/api";
 import { scopeFor } from "../../lib/scope";
+import {
+  IconCopy,
+  IconRefresh,
+  IconCheckCircle,
+  IconAlertTriangle,
+  IconAlertCircle,
+  IconGlobe,
+  IconInfo,
+  IconExternalLink,
+} from "../../components/Icons";
 
 const IDENTITY_KEY = "tf_identity_v1";
 
@@ -39,6 +49,67 @@ type Step =
   | { id: "submit" }
   | { id: "result"; ok: boolean };
 
+// ── Step Indicator (Clean Rectangular / Enterprise) ────────────
+function StepIndicator({ current }: { current: 1 | 2 | 3 }) {
+  const steps = ["1. Anonymous Identity", "2. Trial Selection", "3. Prove & Enroll"];
+  return (
+    <div className="step-indicator" role="list" aria-label="Enrollment progress">
+      {steps.map((label, i) => {
+        const n = (i + 1) as 1 | 2 | 3;
+        const isDone = n < current;
+        const isActive = n === current;
+        return (
+          <div key={label} className="step-item" role="listitem">
+            <div
+              className={`step-circle ${isDone ? "done" : isActive ? "active" : ""}`}
+              aria-label={`Step ${n}: ${label} — ${isDone ? "complete" : isActive ? "current" : "pending"}`}
+            >
+              {isDone ? <IconCheckCircle size={14} /> : n}
+            </div>
+            <span className={`step-label ${isActive ? "active" : ""}`}>{label}</span>
+            {i < steps.length - 1 && (
+              <div className={`step-connector ${isDone ? "done" : ""}`} aria-hidden="true" />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Copy button ───────────────────────────────────────────────
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* ignore */ }
+  };
+  return (
+    <button
+      className="btn-secondary btn-sm"
+      onClick={copy}
+      title="Copy to clipboard"
+      aria-label="Copy commitment to clipboard"
+    >
+      {copied ? (
+        <>
+          <IconCheckCircle size={13} />
+          <span>Copied</span>
+        </>
+      ) : (
+        <>
+          <IconCopy size={13} />
+          <span>Copy</span>
+        </>
+      )}
+    </button>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────
 export default function VolunteerPage() {
   const [config, setConfig] = useState<SiteConfig | null>(null);
   const [members, setMembers] = useState<string[]>([]);
@@ -104,14 +175,13 @@ export default function VolunteerPage() {
       const latest = await getMembers();
       const currentGroup = new Group(latest.members.map(m => BigInt(m.commitment)));
       setMembers(latest.members.map(m => m.commitment));
-      if (!currentGroup.members.includes(identity.commitment)) throw new Error("This identity is not in the current verified group.");
+      if (!currentGroup.members.includes(identity.commitment))
+        throw new Error("This identity is not in the current verified group.");
       const scope = scopeFor(BigInt(protocolId));
       const proof = await generateProof(identity, currentGroup, BigInt(siteId), scope);
 
       setProofBrief(
-        `root=${BigInt(proof.merkleTreeRoot).toString(16)}\nnullifier=${BigInt(proof.nullifier).toString(
-          16
-        )}\nscope=${scope.toString(16)}\nsiteId=${BigInt(proof.message).toString()}`
+        `root=${BigInt(proof.merkleTreeRoot).toString(16)}\nnullifier=${BigInt(proof.nullifier).toString(16)}\nscope=${scope.toString(16)}\nsiteId=${BigInt(proof.message).toString()}`
       );
 
       setStep({ id: "submit" });
@@ -134,157 +204,406 @@ export default function VolunteerPage() {
     }
   };
 
+  // ── Error / Loading screens ───────────────────────────────
   if (error) {
     return (
-      <div className="banner error">
-        Failed to connect to the backend. Start `npm run node -w contracts`, deploy the contract, and run
-        the issuer + relayer servers first.
-        <pre>{error}</pre>
+      <div>
+        <div className="page-header">
+          <h1 className="page-header-title">Volunteer Enrollment</h1>
+          <p className="page-header-subtitle">Anonymous enrollment via zero-knowledge proof</p>
+        </div>
+        <div className="banner error">
+          <div className="banner-icon">
+            <IconAlertTriangle size={18} />
+          </div>
+          <div className="banner-body">
+            <strong>Backend Connection Error</strong>
+            <p style={{ margin: "4px 0 0", fontSize: 13 }}>
+              Unable to connect to internal services. Ensure Hardhat node, contract deployment,
+              issuer (port 4001), and relayer (port 4002) are running.
+            </p>
+            <pre>{error}</pre>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (step.id === "init" || !config || !identity) {
     return (
-      <div className="card">
-        <h2>Volunteer enrollment</h2>
-        <p className="hint">
-          Loading registry config, group membership and protocol/site lists from the backend…
-        </p>
+      <div>
+        <div className="page-header">
+          <h1 className="page-header-title">Volunteer Enrollment</h1>
+          <p className="page-header-subtitle">Anonymous enrollment via zero-knowledge proof</p>
+        </div>
+        <div className="card">
+          <div className="loading-state">
+            <div className="spinner" aria-hidden="true" />
+            <span>Loading registry configuration, membership state, and protocols…</span>
+          </div>
+        </div>
       </div>
     );
   }
 
+  // ── Determine wizard step for indicator ──────────────────
+  const wizardStep: 1 | 2 | 3 =
+    step.id === "proof" || step.id === "submit" || step.id === "result" ? 3 : 1;
+
+  const selectedProtocol = protocols.find((p) => p.id === protocolId);
+  const selectedSite = sites.find((s) => s.id === siteId);
+
   return (
-    <div>
-      <p className="banner">Demo network: {config.network} · chain {config.chainId} · contract <span className="mono">{config.contractAddress}</span></p>
-      <section className="card">
-        <div className="spread">
-          <h2>1 · Your anonymous identity</h2>
-          <button className="secondary" onClick={resetIdentity}>
-            Generate a new one
+    <>
+      <div className="page-header">
+        <h1 className="page-header-title">Volunteer Enrollment</h1>
+        <p className="page-header-subtitle">
+          Guided 3-step enrollment. Generate an anonymous Semaphore credential and submit a cryptographic proof without exposing personal data.
+        </p>
+      </div>
+
+      {/* Network metadata banner */}
+      <div
+        className="banner info"
+        style={{ marginBottom: 20, marginTop: 0 }}
+        role="status"
+        aria-label="Network information"
+      >
+        <div className="banner-icon">
+          <IconGlobe size={18} />
+        </div>
+        <div className="banner-body" style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center" }}>
+          <span><strong>Network:</strong> {config.network}</span>
+          <span><strong>Chain ID:</strong> {config.chainId}</span>
+          <span>
+            <strong>Contract:</strong>{" "}
+            <span className="mono">{config.contractAddress}</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Step indicator */}
+      <StepIndicator current={wizardStep} />
+
+      {/* Step 1 — Anonymous identity */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span className="badge badge-neutral">Step 1</span>
+              <h2 className="card-title" style={{ margin: 0 }}>Anonymous Identity Commitment</h2>
+            </div>
+            <p className="card-subtitle">
+              Your Semaphore v4 secret key stays private inside your browser. Only the public commitment
+              is submitted to the coordinator to establish group membership.
+            </p>
+          </div>
+          <button
+            className="btn-secondary btn-sm"
+            onClick={resetIdentity}
+            title="Generate a fresh identity (replaces the local credential)"
+            style={{ flexShrink: 0 }}
+          >
+            <IconRefresh size={13} />
+            <span>New Identity</span>
           </button>
         </div>
-        <p className="hint">
-          Your identity secret stays in this browser. The public <strong>commitment</strong> is shared
-          with the issuer and added to the on-chain group. Protocol-specific nullifiers are public
-          after enrollment; they are not your identity secret.
-        </p>
-        <div className="stat">
-          <div className="label">Commitment (public once on-chain, shared with issuer)</div>
-          <div className="value mono">{commitment}</div>
+
+        <div
+          style={{
+            background: "var(--surface-alt)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            padding: "14px 16px",
+            marginBottom: 14,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              marginBottom: 8,
+            }}
+          >
+            Public Commitment (Shareable / Non-Secret)
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <code
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
+                wordBreak: "break-all",
+                flex: 1,
+                lineHeight: 1.6,
+                color: "var(--ink)",
+              }}
+            >
+              {commitment}
+            </code>
+            {commitment && <CopyButton text={commitment} />}
+          </div>
         </div>
+
         {isVerifiedMember ? (
-          <div className="banner ok">Your commitment is a member of the verified enrollment group.</div>
+          <div className="banner ok" style={{ margin: 0 }}>
+            <div className="banner-icon">
+              <IconCheckCircle size={18} />
+            </div>
+            <div className="banner-body">
+              <strong>Verified Member:</strong> Your public commitment is recognized in the on-chain group.
+              You are ready to select a trial and generate your proof.
+            </div>
+          </div>
         ) : (
-          <div className="banner warn">
-            Not a member yet. Take your commitment to the <Link href="/coordinator">coordinator</Link>, who
-            will verify your physical ID and add you to the group.
+          <div className="banner warn" style={{ margin: 0 }}>
+            <div className="banner-icon">
+              <IconInfo size={18} />
+            </div>
+            <div className="banner-body">
+              <strong>Pending Membership:</strong> Your commitment is not yet registered in the verified group.
+              Provide your commitment to the <Link href="/coordinator">Site Coordinator</Link> to complete initial issuance.
+            </div>
           </div>
         )}
-      </section>
+      </div>
 
-      <section className="card">
-        <h2>2 · Where are you enrolling?</h2>
-        <p className="hint">
-          The proof binds you to the chosen protocol&apos;s <em>scope</em> and a specific site. Enrolling in
-          the same protocol at a second site will be caught by the duplicate-nullifier gate.
-        </p>
-        <div className="grid">
+      {/* Step 2 — Trial selection */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span className="badge badge-neutral">Step 2</span>
+              <h2 className="card-title" style={{ margin: 0 }}>Trial & Site Selection</h2>
+            </div>
+            <p className="card-subtitle">
+              The cryptographic proof binds your enrollment to a specific protocol scope and site identifier.
+              Attempting to enroll in the same protocol at another site produces an identical nullifier and is rejected.
+            </p>
+          </div>
+        </div>
+
+        <div className="field-group">
           <fieldset>
-            <label>Protocol</label>
-            <select value={protocolId} onChange={(e) => setProtocolId(e.target.value)}>
-              {protocols.length === 0 && <option value="">No protocols registered yet</option>}
+            <label htmlFor="protocol-select">Clinical Protocol</label>
+            <select
+              id="protocol-select"
+              value={protocolId}
+              onChange={(e) => setProtocolId(e.target.value)}
+              disabled={protocols.length === 0}
+            >
+              {protocols.length === 0 && (
+                <option value="">No protocols registered &mdash; register via Sponsor / IRB</option>
+              )}
               {protocols.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name ?? p.id} · id {p.id}
+                  {p.name ?? `Protocol ${p.id}`} (ID: {p.id})
                 </option>
               ))}
             </select>
           </fieldset>
           <fieldset>
-            <label>Site</label>
-            <select value={siteId} onChange={(e) => setSiteId(e.target.value)}>
-              {sites.length === 0 && <option value="">No sites registered yet</option>}
+            <label htmlFor="site-select">Trial Site Location</label>
+            <select
+              id="site-select"
+              value={siteId}
+              onChange={(e) => setSiteId(e.target.value)}
+              disabled={sites.length === 0}
+            >
+              {sites.length === 0 && (
+                <option value="">No sites registered &mdash; register via Sponsor / IRB</option>
+              )}
               {sites.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name ?? s.id} · id {s.id}
+                  {s.name ?? `Site ${s.id}`} (ID: {s.id})
                 </option>
               ))}
             </select>
           </fieldset>
         </div>
-      </section>
 
-      <section className="card">
-        <h2>3 · Prove &amp; enroll</h2>
-        <p className="hint">
-          Generates a Semaphore zk-proof in your browser (first run downloads ~30&nbsp;MB of snark files) and
-          submits it to the relayer. Nothing about your identity is revealed.
-        </p>
+        {(selectedProtocol || selectedSite) && (
+          <div
+            style={{
+              background: "var(--surface-alt)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-sm)",
+              padding: "10px 14px",
+              marginTop: 4,
+            }}
+          >
+            {selectedProtocol && (
+              <div className="info-row">
+                <span className="info-row-label">Selected Protocol</span>
+                <span className="info-row-value">
+                  {selectedProtocol.name ?? `Protocol ${selectedProtocol.id}`}{" "}
+                  <span className="mono">ID {selectedProtocol.id}</span>
+                </span>
+              </div>
+            )}
+            {selectedSite && (
+              <div className="info-row">
+                <span className="info-row-label">Selected Site</span>
+                <span className="info-row-value">
+                  {selectedSite.name ?? `Site ${selectedSite.id}`}{" "}
+                  <span className="mono">ID {selectedSite.id}</span>
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
-        {step.id === "ready" && (
-          <button onClick={runEnrollment} disabled={!isVerifiedMember || !protocolId || !siteId}>
-            Generate proof &amp; submit enrollment
+      {/* Step 3 — Prove & enroll */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span className="badge badge-neutral">Step 3</span>
+              <h2 className="card-title" style={{ margin: 0 }}>Proof Generation & Submission</h2>
+            </div>
+            <p className="card-subtitle">
+              Generates a zero-knowledge membership proof locally in WebAssembly and submits it to the contract relayer.
+            </p>
+          </div>
+        </div>
+
+        {/* Action Button */}
+        {(step.id === "ready" || step.id === "result") && (
+          <button
+            className="btn-primary"
+            onClick={runEnrollment}
+            disabled={!isVerifiedMember || !protocolId || !siteId}
+            style={{ marginBottom: proofBrief || step.id === "result" ? 14 : 0 }}
+          >
+            {step.id === "result"
+              ? (step.ok ? "Submit Another Enrollment" : "Retry Enrollment Proof")
+              : "Generate Proof & Submit Enrollment"}
           </button>
         )}
 
-        {step.id === "proof" && (
-          <p className="banner">
-            <span className="step-dot active" /> Generating zk-proof… this can take a few seconds.
+        {!isVerifiedMember && step.id === "ready" && (
+          <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 8 }}>
+            Group membership verification required prior to proof generation.{" "}
+            <Link href="/coordinator">Open Site Coordinator workspace &rarr;</Link>
           </p>
+        )}
+
+        {/* Progress States */}
+        {step.id === "proof" && (
+          <div className="progress-step active" role="status" aria-live="polite">
+            <div className="spinner" aria-hidden="true" />
+            <span>
+              <strong>Computing Zero-Knowledge Proof…</strong> Generating SnarkJS proof against the Merkle membership tree.
+            </span>
+          </div>
         )}
 
         {step.id === "submit" && (
-          <p className="banner">
-            <span className="step-dot active" /> Proof done — submitting to relayer → on-chain.
-          </p>
+          <div className="progress-step active" role="status" aria-live="polite">
+            <div className="spinner" aria-hidden="true" />
+            <span>
+              <strong>Submitting to Relayer…</strong> Awaiting transaction confirmation from TrialFence smart contract.
+            </span>
+          </div>
         )}
 
+        {/* Proof brief display */}
         {proofBrief && (
-          <pre className="mono" style={{ whiteSpace: "pre-wrap", marginTop: 10 }}>
-            {proofBrief}
-          </pre>
+          <div style={{ marginTop: 12, marginBottom: 12 }}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: "var(--muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                marginBottom: 6,
+              }}
+            >
+              Public Proof Signals (Inspected by Contract)
+            </div>
+            <pre className="mono-block">{proofBrief}</pre>
+          </div>
         )}
 
+        {/* Result banner */}
         {step.id === "result" && result && (
-          <>
-            <div className={`banner ${step.ok ? "ok" : "error"}`}>
-              <strong>{step.ok ? "Enrollment accepted." : result.status === "error" ? "Enrollment could not be completed." : "Enrollment denied."}</strong>
-              {result.reason && <div>Reason: {result.reason}</div>}
-              {result.staticCallError && <div>Rejection: {result.staticCallError}</div>}
+          <div
+            className={`banner ${step.ok ? "ok" : "error"}`}
+            role="alert"
+            aria-live="assertive"
+            style={{ marginTop: 12 }}
+          >
+            <div className="banner-icon">
+              {step.ok ? <IconCheckCircle size={18} /> : <IconAlertCircle size={18} />}
+            </div>
+            <div className="banner-body">
+              <strong>
+                {step.ok
+                  ? "Enrollment Confirmed"
+                  : result.status === "error"
+                  ? "Enrollment Execution Failed"
+                  : "Enrollment Rejected by Gate"}
+              </strong>
+              {result.reason && (
+                <div style={{ marginTop: 4 }}>Gate Reason: {result.reason}</div>
+              )}
+              {result.staticCallError && (
+                <div style={{ marginTop: 4, fontSize: 12.5 }}>
+                  Contract Evaluation: {result.staticCallError}
+                </div>
+              )}
               {result.signedRecord && (
-                <pre>
-                  Signed denial record:{" "}
-                  {`${result.signedRecord.message.slice(0, 24)}… · sig ${result.signedRecord.signature.slice(
-                    0,
-                    24
-                  )}… · ${result.signedRecord.signer}`}
-                </pre>
+                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.9 }}>
+                  Signed Relayer Denial Record:{" "}
+                  <span className="mono">
+                    {result.signedRecord.message.slice(0, 24)}… · sig {result.signedRecord.signature.slice(0, 24)}… · signer {result.signedRecord.signer.slice(0, 10)}…
+                  </span>
+                </div>
+              )}
+              {result.txHash && (
+                <div style={{ marginTop: 8 }}>
+                  {result.explorerUrl ? (
+                    <a
+                      href={result.explorerUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+                    >
+                      <span>View Transaction on Explorer</span>
+                      <IconExternalLink size={12} />
+                    </a>
+                  ) : (
+                    <span>
+                      Local Transaction Hash: <span className="mono">{result.txHash}</span>
+                    </span>
+                  )}
+                </div>
               )}
             </div>
-            {result.txHash && (
-              <p>
-                {result.explorerUrl ? <a href={result.explorerUrl} target="_blank" rel="noreferrer">
-                  View transaction on the explorer →
-                </a> : <span className="mono">Local transaction: {result.txHash}</span>}
-              </p>
-            )}
-              <button onClick={runEnrollment} style={{ marginTop: 8 }}>
-                {step.ok ? "Enroll at selected site (same identity)" : "Try again (fresh proof, same identity)"}
-              </button>
-          </>
+          </div>
         )}
-      </section>
+      </div>
 
-      <section className="card">
-        <h2>Why the nullifier matters</h2>
-        <p className="hint">
-          The nullifier is derived from your secret and the protocol&apos;s scope. The contract stores it once
-          per protocol. Repeat attempts for that protocol share a nullifier and can be linked to one
-          another, but the proof does not reveal which group commitment created them.
+      {/* Explainer */}
+      <div className="card">
+        <h2 className="card-title">Nullifier Determinism & Privacy Guarantees</h2>
+        <p className="card-subtitle" style={{ marginTop: 6 }}>
+          The nullifier is computed as a cryptographic hash of your private identity secret and the protocol scope.
+          Because it is unique per participant-protocol pair, the on-chain registry can identify repeat enrollments
+          without ever learning which Merkle tree commitment was used to generate the proof.
         </p>
-      </section>
-    </div>
+      </div>
+    </>
   );
 }

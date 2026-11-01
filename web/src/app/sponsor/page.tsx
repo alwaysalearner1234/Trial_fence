@@ -12,6 +12,17 @@ import {
   type EnrollmentEvent,
   type ProtocolRow,
 } from "../../lib/api";
+import {
+  IconRefresh,
+  IconExternalLink,
+  IconAlertTriangle,
+  IconCheckCircle,
+  IconAlertCircle,
+  IconInfo,
+  IconFileText,
+  IconClipboard,
+  IconSlash,
+} from "../../components/Icons";
 
 interface Counts {
   accepted: number;
@@ -25,12 +36,27 @@ interface MonitorData {
   totals: Record<string, unknown>;
 }
 
+// ── Clean rectangular severity badge (no pill) ────────────────
+function SeverityBadge({ severity }: { severity: string }) {
+  const s = severity.toLowerCase();
+  const cls =
+    s === "high" || s === "error" || s === "alert"
+      ? "badge-error"
+      : s === "medium" || s === "warn"
+      ? "badge-warn"
+      : s === "info" || s === "low"
+      ? "badge-ok"
+      : "badge-neutral";
+  return <span className={`badge ${cls}`}>{severity.toUpperCase()}</span>;
+}
+
 export default function SponsorPage() {
   const [events, setEvents] = useState<EnrollmentEvent[]>([]);
   const [denials, setDenials] = useState<DenialRecord[]>([]);
   const [protocols, setProtocols] = useState<ProtocolRow[]>([]);
   const [monitor, setMonitor] = useState<MonitorData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const [registryToken, setRegistryToken] = useState("");
   const [pId, setPId] = useState("");
@@ -38,8 +64,11 @@ export default function SponsorPage() {
   const [sId, setSId] = useState("");
   const [sName, setSName] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pBusy, setPBusy] = useState(false);
+  const [sBusy, setSBusy] = useState(false);
 
   const refresh = useCallback(async () => {
+    setRefreshing(true);
     try {
       const [ev, dn, pr] = await Promise.all([getEvents(), getDenials(), getProtocols()]);
       setEvents(ev.events);
@@ -50,6 +79,8 @@ export default function SponsorPage() {
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshing(false);
     }
   }, []);
 
@@ -58,28 +89,34 @@ export default function SponsorPage() {
   }, [refresh]);
 
   const submitProtocol = async () => {
+    setPBusy(true);
     setMsg(null);
     try {
       const res = await registerProtocol(pId, pName.trim() || `Protocol ${pId}`, registryToken);
-      setMsg({ ok: true, text: `Protocol registered. tx: ${res.txHash}` });
+      setMsg({ ok: true, text: `Protocol registered successfully. tx: ${res.txHash}` });
       setPId("");
       setPName("");
       void refresh();
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setPBusy(false);
     }
   };
 
   const submitSite = async () => {
+    setSBusy(true);
     setMsg(null);
     try {
       const res = await registerSite(sId, sName.trim() || `Site ${sId}`, registryToken);
-      setMsg({ ok: true, text: `Site registered. tx: ${res.txHash}` });
+      setMsg({ ok: true, text: `Site registered successfully. tx: ${res.txHash}` });
       setSId("");
       setSName("");
       void refresh();
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSBusy(false);
     }
   };
 
@@ -103,195 +140,530 @@ export default function SponsorPage() {
 
   if (error) {
     return (
-      <div className="banner error">
-        Cannot reach the relayer (port 4002) or the chain. <pre>{error}</pre>
+      <div>
+        <div className="page-header">
+          <h1 className="page-header-title">Sponsor / IRB Dashboard</h1>
+          <p className="page-header-subtitle">Protocol management, enrollment audit and integrity monitoring</p>
+        </div>
+        <div className="banner error">
+          <div className="banner-icon">
+            <IconAlertTriangle size={18} />
+          </div>
+          <div className="banner-body">
+            <strong>Relayer &amp; Network Service Unreachable</strong>
+            <p style={{ margin: "4px 0 0", fontSize: 13 }}>
+              Unable to communicate with relayer service (port 4002) or the underlying blockchain.
+            </p>
+            <pre>{error}</pre>
+          </div>
+        </div>
       </div>
     );
   }
 
+  const pp = perProtocol();
+  const totalAccepted = events.length;
+  const totalDenied = denials.length;
+  const totalProtocols = protocols.length;
+
   return (
-    <div>
-      <section className="card">
-        <h2>Registry access</h2>
-        <p className="hint">Enter your registry token for protocol and site changes. It stays in this page's memory and is sent only with registry requests.</p>
-        <label htmlFor="registry-token">Registry token</label>
-        <input id="registry-token" type="password" value={registryToken} onChange={e => setRegistryToken(e.target.value)} autoComplete="off" />
-      </section>
-      <section className="card">
-        <h2>Register a protocol</h2>
-        <p className="hint">Protocol and site registration use the contract owner and require a registry token when configured.</p>
-        <div className="grid">
-          <fieldset>
-            <label>Protocol ID (uint256)</label>
-            <input value={pId} onChange={(e) => setPId(e.target.value.trim())} placeholder="1" />
-          </fieldset>
-          <fieldset>
-            <label>Display name</label>
-            <input value={pName} onChange={(e) => setPName(e.target.value.trim())} placeholder="TrialFence-01" />
-          </fieldset>
+    <>
+      <div className="page-header" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <h1 className="page-header-title">Sponsor / IRB Governance Dashboard</h1>
+          <p className="page-header-subtitle">
+            Oversee protocol registrations, multi-site enrollment audits, deterministic integrity flags, and relayer denial attestations.
+          </p>
         </div>
-        <button onClick={submitProtocol} disabled={!pId}>
-          Register protocol
+        <button
+          className="btn-secondary btn-sm"
+          onClick={() => void refresh()}
+          disabled={refreshing}
+          aria-label="Refresh telemetry data"
+        >
+          <IconRefresh size={13} />
+          <span>{refreshing ? "Refreshing…" : "Refresh Telemetry"}</span>
         </button>
-      </section>
+      </div>
 
-      <section className="card">
-        <h2>Register a site</h2>
-        <div className="grid">
-          <fieldset>
-            <label>Site ID (uint256)</label>
-            <input value={sId} onChange={(e) => setSId(e.target.value.trim())} placeholder="1" />
-          </fieldset>
-          <fieldset>
-            <label>Display name</label>
-            <input value={sName} onChange={(e) => setSName(e.target.value.trim())} placeholder="North Harbor Clinic" />
-          </fieldset>
+      {/* KPI Overview Grid */}
+      <div className="stat-grid">
+        <div className="stat-card">
+          <div className="stat-card-label">Accepted Enrollments</div>
+          <div className="stat-card-value" style={{ color: "var(--ok)" }}>{totalAccepted}</div>
+          <div className="stat-card-note">On-chain verified events</div>
         </div>
-        <button onClick={submitSite} disabled={!sId}>
-          Register site
-        </button>
-      </section>
+        <div className="stat-card">
+          <div className="stat-card-label">Denied Attempts</div>
+          <div className="stat-card-value" style={{ color: totalDenied > 0 ? "var(--warn)" : "var(--ink)" }}>
+            {totalDenied}
+          </div>
+          <div className="stat-card-note">Signed relayer attestations</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-card-label">Active Protocols</div>
+          <div className="stat-card-value">{totalProtocols}</div>
+          <div className="stat-card-note">Registered on smart contract</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-card-label">Integrity Flags</div>
+          <div
+            className="stat-card-value"
+            style={{
+              color: monitor && monitor.observations.length > 0 ? "var(--warn)" : "var(--ok)",
+            }}
+          >
+            {monitor ? monitor.observations.length : "—"}
+          </div>
+          <div className="stat-card-note">Rule-based anomaly items</div>
+        </div>
+      </div>
 
+      {/* Registry Authorization Token */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <h2 className="card-title">Registry Authorization</h2>
+            <p className="card-subtitle">
+              Sponsor token required for privileged write transactions (protocol and site registration). Stored strictly in component state.
+            </p>
+          </div>
+        </div>
+        <fieldset style={{ marginBottom: 0 }}>
+          <label htmlFor="registry-token">Sponsor / Registry Bearer Token</label>
+          <input
+            id="registry-token"
+            type="password"
+            value={registryToken}
+            onChange={(e) => setRegistryToken(e.target.value)}
+            autoComplete="off"
+            placeholder="Bearer token for contract owner access"
+          />
+        </fieldset>
+      </div>
+
+      {/* Protocol & Site registration row */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+          gap: 18,
+          marginBottom: 18,
+        }}
+      >
+        {/* Register protocol */}
+        <div className="card" style={{ marginBottom: 0 }}>
+          <div className="card-header">
+            <div>
+              <h2 className="card-title">Register Protocol</h2>
+              <p className="card-subtitle">
+                Computes on-chain scope hash: <code>keccak256(&quot;TrialFence-Protocol-v1:&quot;, protocolId)</code>.
+              </p>
+            </div>
+          </div>
+          <fieldset>
+            <label htmlFor="protocol-id">Protocol Identifier (uint256)</label>
+            <input
+              id="protocol-id"
+              value={pId}
+              onChange={(e) => setPId(e.target.value.trim())}
+              placeholder="e.g. 1"
+            />
+          </fieldset>
+          <fieldset>
+            <label htmlFor="protocol-name">Protocol Display Title</label>
+            <input
+              id="protocol-name"
+              value={pName}
+              onChange={(e) => setPName(e.target.value.trim())}
+              placeholder="e.g. TrialFence-Phase-1"
+            />
+          </fieldset>
+          <button
+            className="btn-primary"
+            onClick={submitProtocol}
+            disabled={!pId || pBusy}
+          >
+            {pBusy ? (
+              <>
+                <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} aria-hidden="true" />
+                <span>Registering Protocol…</span>
+              </>
+            ) : "Register Protocol"}
+          </button>
+        </div>
+
+        {/* Register site */}
+        <div className="card" style={{ marginBottom: 0 }}>
+          <div className="card-header">
+            <div>
+              <h2 className="card-title">Register Clinical Site</h2>
+              <p className="card-subtitle">
+                Whitelists trial location ID embedded as public signal in volunteer zero-knowledge proofs.
+              </p>
+            </div>
+          </div>
+          <fieldset>
+            <label htmlFor="site-id">Site Identifier (uint256)</label>
+            <input
+              id="site-id"
+              value={sId}
+              onChange={(e) => setSId(e.target.value.trim())}
+              placeholder="e.g. 1"
+            />
+          </fieldset>
+          <fieldset>
+            <label htmlFor="site-name">Facility / Site Name</label>
+            <input
+              id="site-name"
+              value={sName}
+              onChange={(e) => setSName(e.target.value.trim())}
+              placeholder="e.g. North Harbor Clinic"
+            />
+          </fieldset>
+          <button
+            className="btn-primary"
+            onClick={submitSite}
+            disabled={!sId || sBusy}
+          >
+            {sBusy ? (
+              <>
+                <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} aria-hidden="true" />
+                <span>Registering Site…</span>
+              </>
+            ) : "Register Site"}
+          </button>
+        </div>
+      </div>
+
+      {/* Registration result banner */}
       {msg && (
-        <div className={`banner ${msg.ok ? "ok" : "error"}`}>
-          {msg.ok ? "Done." : "Failed."} <span className="mono">{msg.text}</span>
+        <div className={`banner ${msg.ok ? "ok" : "error"}`} role="alert" aria-live="polite">
+          <div className="banner-icon">
+            {msg.ok ? <IconCheckCircle size={18} /> : <IconAlertCircle size={18} />}
+          </div>
+          <div className="banner-body">
+            <strong>{msg.ok ? "Transaction Execution Completed" : "Registry Operation Failed"}</strong>
+            <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 12, wordBreak: "break-all" }}>
+              {msg.text}
+            </div>
+          </div>
         </div>
       )}
 
-      <section className="card">
-        <div className="spread">
-          <h2>Enrollment audit (on-chain)</h2>
-          <button className="secondary" onClick={() => void refresh()}>
-            Refresh
-          </button>
+      {/* Registered protocols table */}
+      {protocols.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <h2 className="card-title">Configured Protocols</h2>
+              <p className="card-subtitle">Protocols and computed scope hashes active on the contract</p>
+            </div>
+            <span className="badge badge-info">{protocols.length} Protocols</span>
+          </div>
+          <div className="table-wrap">
+            <table aria-label="Registered protocols table">
+              <thead>
+                <tr>
+                  <th style={{ width: 80 }}>ID</th>
+                  <th>Protocol Name</th>
+                  <th>Scope Hash (Keccak256)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {protocols.map((p) => (
+                  <tr key={p.id}>
+                    <td><span className="badge badge-neutral">ID {p.id}</span></td>
+                    <td style={{ fontWeight: 600 }}>{p.name ?? "—"}</td>
+                    <td>
+                      <code style={{ fontFamily: "var(--font-mono)", fontSize: 12, wordBreak: "break-all" }}>
+                        {p.scope ? p.scope : "—"}
+                      </code>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <p className="hint">
-          Only public hashes are on the chain: a scope, a nullifier and an enrollment count. A participant
-          can appear once per protocol across all sites.
-        </p>
+      )}
 
-        <table>
-          <thead>
-            <tr>
-              <th>Protocol</th>
-              <th>Site</th>
-              <th>Accepted</th>
-              <th>Block</th>
-              <th>Transaction</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((e, i) => (
-              <tr key={i}>
-                <td>{e.protocolId}</td>
-                <td>{e.siteId}</td>
-                <td>
-                  <span className="badge ok">
-                    {e.nullifier.slice(0, 10)}… nid
-                  </span>
-                </td>
-                <td>{e.blockNumber}</td>
-                <td>
-                  {e.explorerUrl ? <a href={e.explorerUrl} target="_blank" rel="noreferrer">
-                    {e.txHash.slice(0, 12)}…
-                  </a> : <span className="mono">{e.txHash.slice(0, 12)}… (local receipt)</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {events.length === 0 && <p className="muted">No enrollments yet.</p>}
-      </section>
+      {/* Per-protocol summary counts */}
+      {pp.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <h2 className="card-title">Enrollment Distribution per Protocol</h2>
+              <p className="card-subtitle">Aggregate accepted and denied rates across sites</p>
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table aria-label="Per-protocol breakdown">
+              <thead>
+                <tr>
+                  <th style={{ width: 80 }}>ID</th>
+                  <th>Protocol Name</th>
+                  <th>Accepted</th>
+                  <th>Gate Denials</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pp.map((p) => (
+                  <tr key={p.id}>
+                    <td><span className="badge badge-neutral">ID {p.id}</span></td>
+                    <td style={{ fontWeight: 600 }}>{p.name ?? "—"}</td>
+                    <td>
+                      <span className="badge badge-ok">{p.counts.accepted} Accepted</span>
+                    </td>
+                    <td>
+                      <span className={`badge ${p.counts.denied > 0 ? "badge-warn" : "badge-neutral"}`}>
+                        {p.counts.denied} Denied
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
-      <section className="card">
-        <h2>Per-protocol counts</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Protocol</th>
-              <th>Name</th>
-              <th>Accepted</th>
-              <th>Denied</th>
-            </tr>
-          </thead>
-          <tbody>
-            {perProtocol().map((p) => (
-              <tr key={p.id}>
-                <td>{p.id}</td>
-                <td>{p.name ?? "—"}</td>
-                <td>
-                  <span className="badge ok">{p.counts.accepted}</span>
-                </td>
-                <td>
-                  <span className={`badge ${p.counts.denied > 0 ? "warn" : "info"}`}>{p.counts.denied}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+      {/* Enrollment audit table */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <h2 className="card-title">On-Chain Enrollment Audit Log</h2>
+            <p className="card-subtitle">
+              Public blockchain events emitted by TrialFence.sol. Identifies accepted scope, nullifier, and block number.
+            </p>
+          </div>
+          <span className="badge badge-ok">{events.length} Events</span>
+        </div>
 
-      <section className="card">
-        <h2>Relayer-signed denial records (off-chain)</h2>
-        <p className="hint">
-          When a contract preflight rejects a proof, the relayer saves a signed record off-chain.
-          These are relayer attestations, not site signatures or persisted blockchain rejection events.
-        </p>
-        <table>
-          <thead>
-              <tr>
-                <th>Protocol</th>
-                <th>Site</th>
-                <th>Reason</th>
-                <th>Signed by (relayer)</th>
-                <th>Time</th>
-              </tr>
-          </thead>
-          <tbody>
-            {denials.map((d, i) => (
-              <tr key={i}>
-                <td>{d.protocol_id}</td>
-                <td>{d.site_id}</td>
-                <td>
-                  <span className={`badge ${d.reason === "DUPLICATE" ? "alert" : "warn"}`}>{d.reason}</span>
-                </td>
-                <td className="mono">{d.signer.slice(0, 14)}…</td>
-                <td>{new Date(d.created_at).toLocaleTimeString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {denials.length === 0 && <p className="muted">No denials recorded.</p>}
-      </section>
+        {events.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-icon">
+              <IconFileText size={20} />
+            </div>
+            <p className="empty-state-title">No Enrollment Events Recorded</p>
+            <p className="empty-state-body">
+              Verified volunteer proofs will record on-chain transactions and appear in this audit log.
+            </p>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table aria-label="On-chain enrollment audit log">
+              <thead>
+                <tr>
+                  <th>Protocol</th>
+                  <th>Site</th>
+                  <th>Nullifier Hash</th>
+                  <th>Block</th>
+                  <th>Transaction</th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.map((e, i) => (
+                  <tr key={i}>
+                    <td><span className="badge badge-neutral">ID {e.protocolId}</span></td>
+                    <td><span className="badge badge-neutral">Site {e.siteId}</span></td>
+                    <td>
+                      <code
+                        style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}
+                        title={e.nullifier}
+                      >
+                        {e.nullifier.slice(0, 16)}…
+                      </code>
+                    </td>
+                    <td style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>#{e.blockNumber}</td>
+                    <td>
+                      {e.explorerUrl ? (
+                        <a
+                          href={e.explorerUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+                        >
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{e.txHash.slice(0, 12)}…</span>
+                          <IconExternalLink size={11} />
+                        </a>
+                      ) : (
+                        <code style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                          {e.txHash.slice(0, 12)}… <span className="badge badge-neutral" style={{ fontSize: 9 }}>local</span>
+                        </code>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
-      <section className="card">
-        <h2>AI integrity monitor</h2>
-        <p className="hint">
-          Rule-based anomaly flags computed from public events + signed denials (deterministic). If{" "}
-          <span className="mono">OPENAI_API_KEY</span> is set, an LLM narrative is added on top.
-        </p>
+      {/* Integrity monitor */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <h2 className="card-title">Trial Integrity Monitoring</h2>
+            <p className="card-subtitle">
+              Deterministic rule-based anomaly detection evaluated from event logs and denial records.
+              If configured, LLM narrative synthesis is distinguished separately.
+            </p>
+          </div>
+          {monitor && (
+            <span className="badge badge-neutral" style={{ flexShrink: 0 }}>
+              Updated {new Date(monitor.generatedAt).toLocaleTimeString()}
+            </span>
+          )}
+        </div>
+
         {monitor ? (
           <>
-            {monitor.observations.map((o, i) => (
-              <div key={i} className={`banner ${o.severity === "info" ? "ok" : o.severity}`}>
-                <span className={`badge ${o.severity}`}>{o.severity}</span> {o.message}
+            {monitor.observations.length === 0 ? (
+              <div className="empty-state" style={{ padding: "20px" }}>
+                <div className="empty-state-icon">
+                  <IconCheckCircle size={20} />
+                </div>
+                <p className="empty-state-title">No Integrity Anomalies Detected</p>
+                <p className="empty-state-body">
+                  Rule-based cross-site duplication and frequency checks report normal trial parameters.
+                </p>
               </div>
-            ))}
-            {monitor.report && (
-              <div className="banner">
-                <strong>LLM narrative (model-generated, only because OPENAI_API_KEY is set)</strong>
-                <p>{monitor.report}</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+                {monitor.observations.map((o, i) => {
+                  const bannerClass =
+                    o.severity === "high" || o.severity === "error" || o.severity === "alert"
+                      ? "error"
+                      : o.severity === "medium" || o.severity === "warn"
+                      ? "warn"
+                      : "ok";
+                  return (
+                    <div key={i} className={`banner ${bannerClass}`} style={{ margin: 0 }}>
+                      <div className="banner-icon">
+                        <SeverityBadge severity={o.severity} />
+                      </div>
+                      <div className="banner-body">{o.message}</div>
+                    </div>
+                  );
+                })}
               </div>
             )}
-            <p className="muted">
-              Generated {new Date(monitor.generatedAt).toLocaleTimeString()} · denial rate{" "}
-              {JSON.stringify(monitor.totals)}
-            </p>
+
+            {monitor.report && (
+              <div>
+                <hr className="card-divider" />
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span className="badge badge-info">AI Narrative Analysis</span>
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                    Automated summary produced via LLM analysis of current registry records.
+                  </span>
+                </div>
+                <div
+                  style={{
+                    background: "var(--surface-alt)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-sm)",
+                    padding: "12px 14px",
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                    color: "var(--ink)",
+                  }}
+                >
+                  {monitor.report}
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginTop: 12, fontSize: 11.5, color: "var(--muted)" }}>
+              Diagnostic Aggregate:{" "}
+              {Object.entries(monitor.totals)
+                .map(([k, v]) => `${k}: ${String(v)}`)
+                .join(" · ")}
+            </div>
           </>
         ) : (
-          <p className="muted">Loading…</p>
+          <div className="loading-state">
+            <div className="spinner" aria-hidden="true" />
+            <span>Analyzing trial telemetry…</span>
+          </div>
         )}
-      </section>
-    </div>
+      </div>
+
+      {/* Relayer-signed denial records */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <h2 className="card-title">Relayer-Signed Denial Records</h2>
+            <p className="card-subtitle">
+              Cryptographically signed off-chain attestations created when preflight or on-chain evaluation detects duplicate nullifiers.
+            </p>
+          </div>
+          <span className={`badge ${denials.length > 0 ? "badge-warn" : "badge-neutral"}`}>
+            {denials.length} Denial Attestations
+          </span>
+        </div>
+
+        {denials.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-icon">
+              <IconSlash size={20} />
+            </div>
+            <p className="empty-state-title">No Denial Records</p>
+            <p className="empty-state-body">
+              Signed relayer rejection records will be indexed here if a duplicate enrollment attempt occurs.
+            </p>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table aria-label="Relayer denial records table">
+              <thead>
+                <tr>
+                  <th>Protocol</th>
+                  <th>Site</th>
+                  <th>Gate Reason</th>
+                  <th>Relayer Signer Address</th>
+                  <th>Timestamp</th>
+                </tr>
+              </thead>
+              <tbody>
+                {denials.map((d, i) => (
+                  <tr key={i}>
+                    <td><span className="badge badge-neutral">ID {d.protocol_id}</span></td>
+                    <td><span className="badge badge-neutral">Site {d.site_id}</span></td>
+                    <td>
+                      <span
+                        className={`badge ${
+                          d.reason === "DUPLICATE" ? "badge-error" : "badge-warn"
+                        }`}
+                      >
+                        {d.reason}
+                      </span>
+                    </td>
+                    <td>
+                      <code style={{ fontFamily: "var(--font-mono)", fontSize: 11.5 }}>
+                        {d.signer.slice(0, 16)}…
+                      </code>
+                    </td>
+                    <td style={{ fontSize: 12, color: "var(--muted)" }}>
+                      {new Date(d.created_at).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
   );
 }

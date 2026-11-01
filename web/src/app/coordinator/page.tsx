@@ -8,6 +8,14 @@ import {
   registerIdentity,
   type MemberRow,
 } from "../../lib/api";
+import {
+  IconRefresh,
+  IconAlertTriangle,
+  IconCheckCircle,
+  IconAlertCircle,
+  IconInfo,
+  IconUsers,
+} from "../../components/Icons";
 
 const DOC_TYPES = ["passport", "national-id", "driver-license"];
 
@@ -63,21 +71,21 @@ export default function CoordinatorPage() {
     setBusy(true);
     setOutcome(null);
     try {
-      const res = await registerIdentity(commitment, {
-        docType,
-        documentNumber,
-        fullName,
-      }, issuerToken);
-      setOutcome({ status: "ok", message: `Membership issued to group member #${res.leafIndex}. Transaction: ${res.txHash}` });
+      const res = await registerIdentity(
+        commitment,
+        { docType, documentNumber, fullName },
+        issuerToken
+      );
+      setOutcome({
+        status: "ok",
+        message: `Membership issued to group member #${res.leafIndex}. Transaction: ${res.txHash}`,
+      });
       void refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setOutcome({
-        status: msg.includes("DUPLICATE")
-          ? "duplicate"
-          : msg.includes("ALREADY")
-            ? "duplicate"
-            : "error",
+        status:
+          msg.includes("DUPLICATE") || msg.includes("ALREADY") ? "duplicate" : "error",
         message: msg,
       });
     } finally {
@@ -87,132 +95,315 @@ export default function CoordinatorPage() {
 
   if (error) {
     return (
-      <div className="banner error">
-        Cannot reach the issuer. Is it running on 4001? <pre>{error}</pre>
+      <div>
+        <div className="page-header">
+          <h1 className="page-header-title">Site Coordinator</h1>
+          <p className="page-header-subtitle">Identity verification and group membership issuance</p>
+        </div>
+        <div className="banner error">
+          <div className="banner-icon">
+            <IconAlertTriangle size={18} />
+          </div>
+          <div className="banner-body">
+            <strong>Issuer Service Unavailable</strong>
+            <p style={{ margin: "4px 0 0", fontSize: 13 }}>
+              Unable to communicate with the credential issuer service on port <code>4001</code>.
+            </p>
+            <pre>{error}</pre>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <section className="card">
-        <h2>Issuer status</h2>
-        <div className="grid">
-          <div className="stat">
-            <div className="label">Chain</div>
-            <div className="value">{String(status?.chainId ?? "…")}</div>
+    <>
+      <div className="page-header">
+        <h1 className="page-header-title">Site Coordinator Workspace</h1>
+        <p className="page-header-subtitle">
+          Verify participant identity against demo criteria and issue membership into the Semaphore Merkle group.
+        </p>
+      </div>
+
+      {/* Demo disclaimer */}
+      <div className="banner info" style={{ marginBottom: 20, marginTop: 0 }}>
+        <div className="banner-icon">
+          <IconInfo size={18} />
+        </div>
+        <div className="banner-body">
+          <strong>Demonstration Environment Notice:</strong> This workflow illustrates the off-chain credential
+          issuer boundary using fictional test attributes. It does not connect to real government databases.
+          The issuer computes a one-way digest and inserts the participant&apos;s public commitment into the group;
+          raw identification numbers and participant names are never written to the blockchain.
+        </div>
+      </div>
+
+      {/* Issuer connection status */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <h2 className="card-title">Issuer Service Status</h2>
+            <p className="card-subtitle">Telemetry from credential issuer instance (port 4001)</p>
           </div>
-          <div className="stat">
-            <div className="label">Contract</div>
-            <div className="value mono">{String(status?.trialFence ?? "…").slice(0, 14)}…</div>
+          <button
+            className="btn-secondary btn-sm"
+            onClick={() => void refresh()}
+            aria-label="Refresh issuer connection"
+          >
+            <IconRefresh size={13} />
+            <span>Refresh</span>
+          </button>
+        </div>
+
+        {status ? (
+          <div className="stat-grid">
+            <div className="stat-card">
+              <div className="stat-card-label">Chain ID</div>
+              <div className="stat-card-value">{String(status.chainId ?? "—")}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-card-label">Contract</div>
+              <div className="stat-card-value mono">{String(status.trialFence ?? "—").slice(0, 14)}…</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-card-label">Group Members</div>
+              <div className="stat-card-value">{String(status.memberCount ?? members.length)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-card-label">Issuer Authority</div>
+              <div className="stat-card-value" style={{ marginTop: 4 }}>
+                {String(status.isIssuer) === "true" ? (
+                  <span className="badge badge-ok">Confirmed</span>
+                ) : (
+                  <span className="badge badge-warn">{String(status.isIssuer ?? "Pending")}</span>
+                )}
+              </div>
+            </div>
           </div>
-          <div className="stat">
-            <div className="label">Members</div>
-            <div className="value">{String(status?.memberCount ?? members.length)}</div>
+        ) : (
+          <div className="loading-state">
+            <div className="spinner" aria-hidden="true" />
+            <span>Connecting to issuer service…</span>
           </div>
-          <div className="stat">
-            <div className="label">Is issuer</div>
-            <div className="value">{String(status?.isIssuer ?? "…")}</div>
+        )}
+      </div>
+
+      {/* Identity verification form */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <h2 className="card-title">Participant Identity Verification &amp; Credential Issuance</h2>
+            <p className="card-subtitle">
+              Verify fictional demo credentials and commit the participant&apos;s public key to the on-chain Merkle tree.
+            </p>
           </div>
         </div>
-      </section>
-
-      <section className="card">
-        <h2>Test identity check &amp; issue membership</h2>
-        <p className="hint">
-          Use fictional test data only. This demonstrates the issuer boundary, not government-ID
-          verification. The issuer stores a keyed digest and the public commitment, and can link those
-          two records. Raw document numbers and names are not stored. The participant secret stays on the device.
-        </p>
 
         <fieldset>
-          <label>Commitment (copy it from the volunteer browser)</label>
+          <label htmlFor="commitment-input">
+            Participant Public Commitment
+            <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "var(--muted)" }}>
+              (copied from volunteer browser)
+            </span>
+          </label>
           <input
+            id="commitment-input"
             value={commitment}
             onChange={(e) => setCommitment(e.target.value.trim())}
-            placeholder="0x… / decimal commitment"
+            placeholder="Decimal or 0x… Semaphore commitment"
           />
         </fieldset>
+
         <fieldset>
-          <label>Issuer access token (if required by this deployment)</label>
-          <input type="password" autoComplete="off" value={issuerToken} onChange={(e) => setIssuerToken(e.target.value)} />
+          <label htmlFor="issuer-token">
+            Issuer Authorization Token
+            <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "var(--muted)" }}>
+              (optional Bearer token if required by deployment)
+            </span>
+          </label>
+          <input
+            id="issuer-token"
+            type="password"
+            autoComplete="off"
+            value={issuerToken}
+            onChange={(e) => setIssuerToken(e.target.value)}
+            placeholder="Optional authorization token"
+          />
         </fieldset>
-        <div className="grid">
-          <fieldset>
-            <label>Document type</label>
-            <select value={docType} onChange={(e) => setDocType(e.target.value)}>
-              {DOC_TYPES.map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
-          </fieldset>
-          <fieldset>
-            <label>Document number</label>
-            <input
-              value={documentNumber}
-              onChange={(e) => setDocumentNumber(e.target.value.trim())}
-              placeholder="e.g. AB1234567 (demo data only)"
-            />
-          </fieldset>
-          <fieldset>
-            <label>Full name (displayed only, never stored)</label>
-            <input
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value.trim())}
-              placeholder="e.g. Jane Doe"
-            />
-          </fieldset>
+
+        <div
+          style={{
+            background: "var(--surface-alt)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            padding: "14px 16px",
+            marginBottom: 16,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              marginBottom: 12,
+            }}
+          >
+            Fictional Demonstration Document Fields
+          </div>
+          <div className="field-group">
+            <fieldset style={{ margin: 0 }}>
+              <label htmlFor="doc-type">Document Classification</label>
+              <select
+                id="doc-type"
+                value={docType}
+                onChange={(e) => setDocType(e.target.value)}
+              >
+                {DOC_TYPES.map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
+              </select>
+            </fieldset>
+            <fieldset style={{ margin: 0 }}>
+              <label htmlFor="doc-number">
+                Test Document Identifier
+                <span style={{ marginLeft: 4, fontSize: 11, fontWeight: 400 }}>(fictional only)</span>
+              </label>
+              <input
+                id="doc-number"
+                value={documentNumber}
+                onChange={(e) => setDocumentNumber(e.target.value.trim())}
+                placeholder="e.g. AB1234567"
+              />
+            </fieldset>
+            <fieldset style={{ margin: 0 }}>
+              <label htmlFor="full-name">
+                Participant Name
+                <span style={{ marginLeft: 4, fontSize: 11, fontWeight: 400 }}>(session only, never persisted)</span>
+              </label>
+              <input
+                id="full-name"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value.trim())}
+                placeholder="e.g. Jane Doe"
+              />
+            </fieldset>
+          </div>
         </div>
 
+        {/* Outcome banner */}
         {outcome && (
-          <div className={`banner ${outcome.status === "ok" ? "ok" : "error"}`}>
-            <strong>
-              {outcome.status === "ok"
-                ? "Membership issued."
-                : outcome.status === "duplicate"
-                  ? "Identity already registered with this credential."
-                  : "Error."}
-            </strong>
-            <div className="mono">{outcome.message}</div>
-            {outcome.status === "duplicate" && (
-              <span>
-                {" "}
-                The coordinator-facing registry correctly refused to register the same document twice.{" "}
-                <Link href="/volunteer">Back to volunteer →</Link>
-              </span>
-            )}
+          <div
+            className={`banner ${outcome.status === "ok" ? "ok" : outcome.status === "duplicate" ? "warn" : "error"}`}
+            role="alert"
+            aria-live="assertive"
+            style={{ marginBottom: 16 }}
+          >
+            <div className="banner-icon">
+              {outcome.status === "ok" ? (
+                <IconCheckCircle size={18} />
+              ) : outcome.status === "duplicate" ? (
+                <IconAlertTriangle size={18} />
+              ) : (
+                <IconAlertCircle size={18} />
+              )}
+            </div>
+            <div className="banner-body">
+              <strong>
+                {outcome.status === "ok"
+                  ? "Membership Successfully Issued"
+                  : outcome.status === "duplicate"
+                  ? "Duplicate Credential Detected"
+                  : "Credential Issuance Failed"}
+              </strong>
+              <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 12, wordBreak: "break-all" }}>
+                {outcome.message}
+              </div>
+              {outcome.status === "duplicate" && (
+                <div style={{ marginTop: 8 }}>
+                  The issuer boundary correctly rejected re-registration of an already enrolled document.{" "}
+                  <Link href="/volunteer">Return to Volunteer &rarr;</Link>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
-        <button onClick={submit} disabled={busy || !commitment || !documentNumber}>
-          {busy ? "Issuing…" : "Verify ID & issue membership"}
+        <button
+          className="btn-primary"
+          onClick={submit}
+          disabled={busy || !commitment || !documentNumber}
+        >
+          {busy ? (
+            <>
+              <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} aria-hidden="true" />
+              <span>Verifying &amp; Issuing…</span>
+            </>
+          ) : (
+            "Verify ID & Issue Group Membership"
+          )}
         </button>
-      </section>
+      </div>
 
-      <section className="card">
-        <h2>Group members</h2>
-        <p className="hint">
-          Public commitments in the shared group, also read by volunteer browsers to build proofs.
-          Participant identity secrets are never here.
-        </p>
-        <table>
-          <thead>
-            <tr>
-              <th>Index</th>
-              <th>Commitment</th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map((m) => (
-              <tr key={m.index}>
-                <td>{m.index}</td>
-                <td className="mono">{m.commitment}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {members.length === 0 && <p className="muted">No members yet.</p>}
-      </section>
-    </div>
+      {/* Group members table */}
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <h2 className="card-title">Verified Group Commitments</h2>
+            <p className="card-subtitle">
+              Public Merkle tree leaves available to volunteer clients for zero-knowledge proof generation.
+            </p>
+          </div>
+          <span className="badge badge-info" aria-label={`${members.length} members`}>
+            {members.length} Members
+          </span>
+        </div>
+
+        {members.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-icon">
+              <IconUsers size={20} />
+            </div>
+            <p className="empty-state-title">No Group Members Recorded</p>
+            <p className="empty-state-body">
+              Issue the first participant credential using the form above to initialize the group Merkle tree.
+            </p>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table aria-label="Group members table">
+              <thead>
+                <tr>
+                  <th style={{ width: 90 }}>Leaf Index</th>
+                  <th>Public Identity Commitment</th>
+                </tr>
+              </thead>
+              <tbody>
+                {members.map((m) => (
+                  <tr key={m.index}>
+                    <td>
+                      <span className="badge badge-neutral">#{m.index}</span>
+                    </td>
+                    <td>
+                      <code
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 12,
+                          wordBreak: "break-all",
+                          color: "var(--ink)",
+                        }}
+                      >
+                        {m.commitment}
+                      </code>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
