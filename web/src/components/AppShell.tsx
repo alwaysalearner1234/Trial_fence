@@ -112,14 +112,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 aria-current={isActive ? "page" : undefined}
               >
                 <Icon size={16} />
-                {label}
+                <span>{label}</span>
               </Link>
             );
           })}
         </nav>
 
         <div className="sidebar-footer">
-          <div style={{ fontWeight: 600, color: "#FFFFFF", marginBottom: 2 }}>Clinical Precision UI</div>
+          <div style={{ fontWeight: 600, color: "var(--sidebar-active-text)", marginBottom: 2 }}>Clinical Precision UI</div>
           <div>Demonstration environment.</div>
           <div>Secret stays on device.</div>
         </div>

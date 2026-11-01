@@ -67,49 +67,102 @@ const proofSteps = [
 ];
 
 const highlights = [
-  { label: "Group Membership", value: "1 Verified Group", Icon: IconLock },
-  { label: "On-Chain PII", value: "Zero Stored", Icon: IconShieldCheck },
-  { label: "Proof Bindings", value: "Scope + Site ID", Icon: IconLink },
-  { label: "Duplicate Gate", value: "Nullifier-Gated", Icon: IconSlash },
+  { label: "Group Membership", value: "1 Verified Group", note: "On-chain Merkle tree", Icon: IconLock },
+  { label: "On-Chain PII", value: "Zero Stored", note: "Complete privacy boundary", Icon: IconShieldCheck },
+  { label: "Proof Bindings", value: "Scope + Site ID", note: "Protocol scoped", Icon: IconLink },
+  { label: "Duplicate Gate", value: "Nullifier-Gated", note: "Prevents double enrollment", Icon: IconSlash },
 ];
 
 export default function HomePage() {
   return (
     <>
-      {/* Hero section */}
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div style={{ maxWidth: 720 }}>
+      {/* Hero section — Rebalanced 2-column layout with inline clinical SVG */}
+      <div className="card hero-card" style={{ marginBottom: 20 }}>
+        <div className="hero-content">
           <div style={{ marginBottom: 12 }}>
             <span className="institutional-tag notice">
               Demonstration Environment &mdash; Fictional Test Data
             </span>
           </div>
 
-          <h1
-            style={{
-              fontSize: 26,
-              fontWeight: 800,
-              color: "var(--ink)",
-              margin: "0 0 10px",
-              letterSpacing: "-0.4px",
-              lineHeight: 1.25,
-            }}
-          >
+          <h1 className="hero-title">
             Privacy-Preserving Clinical Trial Enrollment
           </h1>
 
-          <p style={{ fontSize: 14, color: "var(--muted)", margin: "0 0 16px", lineHeight: 1.65 }}>
+          <p className="hero-lead">
             TrialFence is an enterprise zero-knowledge enrollment gate for multi-site clinical trials.
             The verified participant can enroll <strong style={{ color: "var(--ink)" }}>once per protocol</strong> across
             all participating clinical trial sites &mdash; without exposing any personally identifiable
             information (PII) on the public blockchain.
           </p>
 
-          <p style={{ fontSize: 13, color: "var(--muted)", margin: 0, lineHeight: 1.6 }}>
+          <p className="hero-subtext">
             Powered by <strong style={{ color: "var(--ink)" }}>Semaphore v4</strong> zk-SNARKs.
             Only public group commitments, protocol-scoped nullifiers, and zk-proof points are verified by the smart contract.
-            Names, government document numbers, and identity secrets remain strictly confidential.
+            Names, government document numbers, and identity secrets remain strictly confidential on the participant device.
           </p>
+        </div>
+
+        {/* Clinical Precision SVG: Shield + Privacy Fence + Merkle Node-Link Motif */}
+        <div className="hero-illustration" aria-hidden="true">
+          <svg
+            className="hero-svg"
+            viewBox="0 0 320 220"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            {/* Ambient Background Grid / Circuit Accent */}
+            <rect x="20" y="20" width="280" height="180" rx="12" stroke="var(--border)" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+            
+            {/* Privacy Fence Perimeter Guide */}
+            <path
+              d="M160 28 L260 62 V125 C260 168 160 198 160 198 C160 198 60 168 60 125 V62 Z"
+              stroke="var(--secondary)"
+              strokeWidth="1.25"
+              strokeDasharray="4 4"
+              opacity="0.35"
+            />
+
+            {/* Inner Clinical Shield */}
+            <path
+              d="M160 40 L242 68 V120 C242 155 160 182 160 182 C160 182 78 155 78 120 V68 Z"
+              fill="var(--accent-tint)"
+              fillOpacity="0.45"
+              stroke="var(--secondary)"
+              strokeWidth="1.75"
+            />
+
+            {/* Merkle Tree / ZK Node-Link Network */}
+            {/* Tree Branch Links */}
+            <line x1="160" y1="64" x2="114" y2="104" stroke="var(--secondary)" strokeWidth="1.5" strokeOpacity="0.6" />
+            <line x1="160" y1="64" x2="206" y2="104" stroke="var(--secondary)" strokeWidth="1.5" strokeOpacity="0.6" />
+            <line x1="114" y1="104" x2="94" y2="148" stroke="var(--secondary)" strokeWidth="1.2" strokeOpacity="0.5" strokeDasharray="2 2" />
+            <line x1="114" y1="104" x2="134" y2="148" stroke="var(--secondary)" strokeWidth="1.2" strokeOpacity="0.5" />
+            <line x1="206" y1="104" x2="186" y2="148" stroke="var(--secondary)" strokeWidth="1.2" strokeOpacity="0.5" />
+            <line x1="206" y1="104" x2="226" y2="148" stroke="var(--secondary)" strokeWidth="1.2" strokeOpacity="0.5" strokeDasharray="2 2" />
+
+            {/* Root Node (Group Merkle Root) */}
+            <circle cx="160" cy="64" r="10" fill="var(--surface)" stroke="var(--primary)" strokeWidth="2" />
+            <circle cx="160" cy="64" r="4" fill="var(--secondary)" />
+
+            {/* Intermediate Verification Nodes */}
+            <circle cx="114" cy="104" r="7" fill="var(--surface)" stroke="var(--secondary)" strokeWidth="1.75" />
+            <circle cx="114" cy="104" r="2.5" fill="var(--secondary)" />
+
+            <circle cx="206" cy="104" r="7" fill="var(--surface)" stroke="var(--secondary)" strokeWidth="1.75" />
+            <circle cx="206" cy="104" r="2.5" fill="var(--secondary)" />
+
+            {/* Participant Leaf Nodes */}
+            <circle cx="94" cy="148" r="5" fill="var(--surface)" stroke="var(--muted)" strokeWidth="1.5" />
+            <circle cx="134" cy="148" r="5.5" fill="var(--surface)" stroke="var(--ok)" strokeWidth="1.75" />
+            <circle cx="134" cy="148" r="2" fill="var(--ok)" />
+            <circle cx="186" cy="148" r="5" fill="var(--surface)" stroke="var(--muted)" strokeWidth="1.5" />
+            <circle cx="226" cy="148" r="5" fill="var(--surface)" stroke="var(--muted)" strokeWidth="1.5" />
+
+            {/* Subtle Node Halo Glows */}
+            <circle cx="160" cy="64" r="17" stroke="var(--secondary)" strokeWidth="1" strokeOpacity="0.25" />
+            <circle cx="134" cy="148" r="11" stroke="var(--ok)" strokeWidth="1" strokeOpacity="0.3" strokeDasharray="2 2" />
+          </svg>
         </div>
       </div>
 
@@ -123,9 +176,10 @@ export default function HomePage() {
                 <HighlightIcon size={14} />
                 <span>{h.label}</span>
               </div>
-              <div className="stat-card-value" style={{ fontSize: 17, fontWeight: 700, marginTop: 4 }}>
+              <div className="stat-card-value">
                 {h.value}
               </div>
+              <div className="stat-card-note">{h.note}</div>
             </div>
           );
         })}
@@ -134,7 +188,7 @@ export default function HomePage() {
       {/* Role Selection */}
       <div style={{ marginBottom: 8 }}>
         <div className="page-header" style={{ marginBottom: 14 }}>
-          <h2 className="page-header-title" style={{ fontSize: 16, marginBottom: 2 }}>
+          <h2 className="page-header-title" style={{ fontSize: 18, marginBottom: 2 }}>
             Workspace Roles
           </h2>
           <p className="page-header-subtitle">
@@ -161,10 +215,10 @@ export default function HomePage() {
                   <h3 className="role-card-title">{r.title}</h3>
                 </div>
                 <p className="role-card-body">{r.body}</p>
-                <span className="role-card-cta">
+                <div className="role-card-cta">
                   <span>{r.cta}</span>
                   <span aria-hidden="true">&rarr;</span>
-                </span>
+                </div>
               </Link>
             );
           })}
@@ -195,37 +249,42 @@ export default function HomePage() {
               style={{
                 background: "var(--surface-alt)",
                 border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm)",
-                padding: "16px",
+                borderRadius: "var(--radius-md)",
+                padding: "16px 18px",
+                display: "flex",
+                flexDirection: "column",
               }}
             >
               <div
                 style={{
                   fontFamily: "var(--font-mono)",
                   fontSize: 11,
-                  fontWeight: 700,
+                  fontWeight: 600,
                   color: "var(--secondary)",
                   marginBottom: 6,
-                  letterSpacing: "0.04em",
+                  letterSpacing: "0.06em",
                 }}
               >
                 PHASE {s.step}
               </div>
               <div
                 style={{
-                  fontSize: 14,
-                  fontWeight: 700,
+                  fontFamily: "var(--font-heading)",
+                  fontSize: 14.5,
+                  fontWeight: 600,
                   color: "var(--ink)",
                   marginBottom: 8,
                 }}
               >
                 {s.title}
               </div>
-              <p style={{ fontSize: 12.5, color: "var(--muted)", margin: "0 0 10px", lineHeight: 1.55 }}>
+              <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 14px", lineHeight: 1.55, flex: 1 }}>
                 {s.what}
               </p>
-              <div className="badge badge-info" style={{ fontSize: 10.5 }}>
-                {s.who}
+              <div>
+                <span className="badge badge-info" style={{ fontSize: 10.5 }}>
+                  {s.who}
+                </span>
               </div>
             </div>
           ))}

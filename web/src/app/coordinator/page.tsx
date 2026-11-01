@@ -15,6 +15,9 @@ import {
   IconAlertCircle,
   IconInfo,
   IconUsers,
+  IconGlobe,
+  IconDatabase,
+  IconShieldCheck,
 } from "../../components/Icons";
 
 const DOC_TYPES = ["passport", "national-id", "driver-license"];
@@ -158,19 +161,31 @@ export default function CoordinatorPage() {
         {status ? (
           <div className="stat-grid">
             <div className="stat-card">
-              <div className="stat-card-label">Chain ID</div>
+              <div className="stat-card-label">
+                <IconGlobe size={13} />
+                <span>Chain ID</span>
+              </div>
               <div className="stat-card-value">{String(status.chainId ?? "—")}</div>
             </div>
             <div className="stat-card">
-              <div className="stat-card-label">Contract</div>
+              <div className="stat-card-label">
+                <IconDatabase size={13} />
+                <span>Contract</span>
+              </div>
               <div className="stat-card-value mono">{String(status.trialFence ?? "—").slice(0, 14)}…</div>
             </div>
             <div className="stat-card">
-              <div className="stat-card-label">Group Members</div>
+              <div className="stat-card-label">
+                <IconUsers size={13} />
+                <span>Group Members</span>
+              </div>
               <div className="stat-card-value">{String(status.memberCount ?? members.length)}</div>
             </div>
             <div className="stat-card">
-              <div className="stat-card-label">Issuer Authority</div>
+              <div className="stat-card-label">
+                <IconShieldCheck size={13} />
+                <span>Issuer Authority</span>
+              </div>
               <div className="stat-card-value" style={{ marginTop: 4 }}>
                 {String(status.isIssuer) === "true" ? (
                   <span className="badge badge-ok">Confirmed</span>
@@ -235,8 +250,8 @@ export default function CoordinatorPage() {
           style={{
             background: "var(--surface-alt)",
             border: "1px solid var(--border)",
-            borderRadius: "var(--radius-sm)",
-            padding: "14px 16px",
+            borderRadius: "var(--radius-md)",
+            padding: "16px",
             marginBottom: 16,
           }}
         >

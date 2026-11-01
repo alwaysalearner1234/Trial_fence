@@ -189,24 +189,36 @@ export default function SponsorPage() {
       {/* KPI Overview Grid */}
       <div className="stat-grid">
         <div className="stat-card">
-          <div className="stat-card-label">Accepted Enrollments</div>
+          <div className="stat-card-label">
+            <IconCheckCircle size={13} />
+            <span>Accepted Enrollments</span>
+          </div>
           <div className="stat-card-value" style={{ color: "var(--ok)" }}>{totalAccepted}</div>
           <div className="stat-card-note">On-chain verified events</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">Denied Attempts</div>
+          <div className="stat-card-label">
+            <IconSlash size={13} />
+            <span>Denied Attempts</span>
+          </div>
           <div className="stat-card-value" style={{ color: totalDenied > 0 ? "var(--warn)" : "var(--ink)" }}>
             {totalDenied}
           </div>
           <div className="stat-card-note">Signed relayer attestations</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">Active Protocols</div>
+          <div className="stat-card-label">
+            <IconFileText size={13} />
+            <span>Active Protocols</span>
+          </div>
           <div className="stat-card-value">{totalProtocols}</div>
           <div className="stat-card-note">Registered on smart contract</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-label">Integrity Flags</div>
+          <div className="stat-card-label">
+            <IconAlertTriangle size={13} />
+            <span>Integrity Flags</span>
+          </div>
           <div
             className="stat-card-value"
             style={{
@@ -572,7 +584,7 @@ export default function SponsorPage() {
                   style={{
                     background: "var(--surface-alt)",
                     border: "1px solid var(--border)",
-                    borderRadius: "var(--radius-sm)",
+                    borderRadius: "var(--radius-md)",
                     padding: "12px 14px",
                     fontSize: 13,
                     lineHeight: 1.6,

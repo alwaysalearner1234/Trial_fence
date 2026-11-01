@@ -313,7 +313,7 @@ export default function VolunteerPage() {
           style={{
             background: "var(--surface-alt)",
             border: "1px solid var(--border)",
-            borderRadius: "var(--radius-sm)",
+            borderRadius: "var(--radius-md)",
             padding: "14px 16px",
             marginBottom: 14,
           }}
@@ -436,7 +436,7 @@ export default function VolunteerPage() {
             style={{
               background: "var(--surface-alt)",
               border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
+              borderRadius: "var(--radius-md)",
               padding: "10px 14px",
               marginTop: 4,
             }}
