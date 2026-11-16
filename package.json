@@ -21,5 +21,8 @@
     "relayer": "npm run relayer -w server",
     "web": "npm run dev -w web",
     "start:render": "node scripts/render-start.mjs"
+  },
+  "dependencies": {
+    "wasmcurves": "^0.2.2"
   }
 }
