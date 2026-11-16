@@ -22,7 +22,7 @@ function refuse(body: Response, status: number, code: string, detail: string) {
   body.status(status).json({ error: code, detail });
 }
 
-// Optional shared bearer token. Empty in dev mode.
+/** Optional shared bearer token. Empty in dev mode. */
 function requireIssuerKey(req: Request, res: Response, next: NextFunction) {
   if (!config.issuerApiKey) return next();
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
@@ -30,10 +30,8 @@ function requireIssuerKey(req: Request, res: Response, next: NextFunction) {
   res.status(401).json({ error: "UNAUTHORIZED" });
 }
 
-/**
- * GET /members — public identity commitments in verified-group order, used by the
- * volunteer browser to rebuild the Merkle tree and generate membership proofs.
- */
+/** GET /members — public identity commitments in verified-group order, used by the
+ * volunteer browser to rebuild the Merkle tree and generate membership proofs. */
 app.get(
   "/members",
   wrap(async (_req, res) => {
@@ -47,9 +45,7 @@ app.get(
   })
 );
 
-/**
- * GET /status — issuer boundary wireframe status.
- */
+/** GET /status — issuer boundary wireframe status. */
 app.get(
   "/status",
   wrap(async (_req, res) => {
@@ -83,8 +79,7 @@ app.get("/health", (_req, res) => {
   });
 });
 
-/**
- * POST /register
+/** POST /register
  * The coordinator "verifies" a clearly-labelled TEST identity document once.
  * The issuer:
  *   1. normalizes the identifier, computes a keyed HMAC digest and refuses a
@@ -208,8 +203,7 @@ function persistMembership(
   }
 }
 
-/**
- * Startup reconciliation (issues #4, #6): replays on-chain MembershipIssued
+/** Startup reconciliation (issues #4, #6): replays on-chain MembershipIssued
  * events into the local members mirror so a restart — or a crash between
  * confirmation and persistence — cannot leave SQLite behind the chain.
  * Identity HMAC rows cannot be rebuilt from chain data by design (only
@@ -239,9 +233,7 @@ async function reconcileMembership(): Promise<void> {
   const dbCount = (db.prepare("SELECT COUNT(*) AS n FROM members").get() as { n: number }).n;
   const orphaned = (
     db
-      .prepare(
-        "SELECT COUNT(*) AS n FROM members m LEFT JOIN identities i ON i.commitment = m.commitment WHERE i.hmac IS NULL"
-      )
+      .prepare("SELECT COUNT(*) AS n FROM members m LEFT JOIN identities i ON i.commitment = m.commitment WHERE i.hmac IS NULL")
       .get() as { n: number }
   ).n;
 

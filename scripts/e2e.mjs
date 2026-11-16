@@ -8,8 +8,7 @@ const ISSUER = process.env.ISSUER_URL ?? "http://127.0.0.1:4001";
 const RELAYER = process.env.RELAYER_URL ?? "http://127.0.0.1:4002";
 
 const SCOPE_DOMAIN = "TrialFence-Protocol-v1:";
-const scopeFor = (protocolId) =>
-  BigInt(solidityPackedKeccak256(["string", "uint256"], [SCOPE_DOMAIN, BigInt(protocolId).toString()]));
+const scopeFor = (protocolId) => BigInt(solidityPackedKeccak256(["string", "uint256"], [SCOPE_DOMAIN, BigInt(protocolId).toString()]));
 
 let failures = 0;
 const check = (label, cond, extra = "") => {
@@ -73,6 +72,7 @@ const testId = { docType: "passport", documentNumber: "AB1234567", fullName: "Ja
 
 let { status, json } = await http(`${ISSUER}/register`, "POST", { commitment, testId });
 check("issuer accepts first registration", status === 201 && json.status === "accepted", `leaf ${json.leafIndex}`);
+
 check("issuer response contains a numeric index and transaction", typeof json.leafIndex === "number" && typeof json.txHash === "string");
 
 { const dup = await http(`${ISSUER}/register`, "POST", { commitment, testId }); // same commitment + same doc
@@ -96,10 +96,12 @@ check("our commitment is a member", group.indexOf(BigInt(commitment)) >= 0);
 console.log("\n== Enrollment (relayer → on-chain) ==");
 let r = await enroll(identity, group, P1, S1);
 check("first enroll accepted", r.json.accepted === true, `tx ${r.json.txHash}`);
+
 check("accepted response matches the browser contract", r.json.status === "accepted");
 
 r = await enroll(identity, group, P1, S2);
-check("duplicate at second site denied", r.json.accepted === false && r.json.reason === "DUPLICATE", r.json.reason + (r.json.detail ? ` :: ${r.json.detail}` : ""));
+check("duplicate at second site denied", r.json.accepted === false && r.json.reason === "DUPLICATE", r.json.reason + (r.json.detail ? ` :: ${r.json.detail} :` : ""));
+
 check("denied response includes the browser signed record", r.json.status === "denied" && Boolean(r.json.signedRecord?.signature));
 
 r = await enroll(identity, group, P2, S1);
@@ -151,7 +153,8 @@ check("unknown-tree / non-member proof denied", r.json.accepted === false && ["N
              message: proof.message.toString(), nullifier: proof.nullifier.toString(), scope: scope.toString(),
              points: proof.points.map((p) => p.toString()) },
   });
-  check("wrong-scope proof denied", out.json.accepted === false && out.json.reason === "WRONG_SCOPE", out.json.reason); }
+  check("wrong-scope proof denied", out.json.accepted === false && out.json.reason === "WRONG_SCOPE", out.json.reason);
+}
 
 // 4. Audit trail
 console.log("\n== Audit ==");
@@ -173,8 +176,7 @@ check("monitor sources labeled (deterministic rules, explicit narrative source)"
 console.log("\n== Robustness ==");
 
 // #6: five concurrent registrations for the SAME document issue exactly one credential.
-{
-  const raids = await Promise.all(
+{ const raids = await Promise.all(
     Array.from({ length: 5 }, (_, i) => {
       const dev = new Identity();
       return http(`${ISSUER}/register`, "POST", {
@@ -185,12 +187,10 @@ console.log("\n== Robustness ==");
   );
   const accepted = raids.filter((r) => r.status === 201);
   const refused = raids.filter((r) => r.status === 409 && r.json.error === "DUPLICATE_IDENTITY");
-  check("concurrent same-document issuance yields exactly one credential", accepted.length === 1 && refused.length === 4, `201=${accepted.length} 409=${refused.length}`);
-}
+  check("concurrent same-document issuance yields exactly one credential", accepted.length === 1 && refused.length === 4, `201=${accepted.length} 409=${refused.length}`); }
 
 // #5: a well-formed proof for an UNREGISTERED site is rejected as SITE_NOT_FOUND.
-{
-  const bogus = new Group(members);
+{ const bogus = new Group(members);
   const proof = await generateProof(identity, bogus, 99n, scopeFor(P1));
   const out = await http(`${RELAYER}/enroll`, "POST", {
     protocolId: String(P1), siteId: String(99),
@@ -198,13 +198,11 @@ console.log("\n== Robustness ==");
              message: proof.message.toString(), nullifier: proof.nullifier.toString(), scope: scopeFor(P1).toString(),
              points: proof.points.map((p) => p.toString()) },
   });
-  check("unregistered-site enrollment denied", out.json.accepted === false && out.json.reason === "SITE_NOT_FOUND", out.json.reason);
-}
+  check("unregistered-site enrollment denied", out.json.accepted === false && out.json.reason === "SITE_NOT_FOUND", out.json.reason); }
 
 // #7: a fabricated request reusing a CONSUMED nullifier with garbage points is
 // INVALID_PROOF, not a verified DUPLICATE.
-{
-  const groupNow = new Group(await getMembers());
+{ const groupNow = new Group(await getMembers());
   const consumed = (await http(`${RELAYER}/events`)).json.events[0].nullifier;
   const scope = scopeFor(P1);
   const fake = await generateProof(identity, groupNow, BigInt(S1), scope);
@@ -214,12 +212,10 @@ console.log("\n== Robustness ==");
              message: BigInt(S1).toString(), nullifier: String(consumed), scope: scope.toString(),
              points: Array.from({ length: 8 }, (_, i) => String(1000 + i)) },
   });
-  check("fabricated consumed-nullifier request labeled INVALID_PROOF", out.json.accepted === false && out.json.reason === "INVALID_PROOF", `${out.json.reason} (verification=${out.json.verification})`);
-}
+  check("fabricated consumed-nullifier request labeled INVALID_PROOF", out.json.accepted === false && out.json.reason === "INVALID_PROOF", `${out.json.reason} (verification=${out.json.verification})`); }
 
 // #7: tamper-evidence — modifying a denial field breaks signature recovery.
-{
-  const { json: all } = await http(`${RELAYER}/denials`);
+{ const { json: all } = await http(`${RELAYER}/denials`);
   const target = all.denials[all.denials.length - 1];
   const verify = await http(`${RELAYER}/denials/${target.id}/verify`);
   check("denial verify endpoint confirms intact record", verify.json.valid === true && verify.json.trustedSigner === true && verify.json.digestVersion === "V2" && verify.json.signerRole === "relayer", `signer ${verify.json.signer}`);
@@ -228,31 +224,27 @@ console.log("\n== Robustness ==");
     ["TRIALFENCE_DENIAL_V2", String(target.protocol_id), String(target.site_id), String(target.nullifier ?? "0"), String(target.reason) + "-TAMPERED", String(target.created_at)]
   ));
   const tamperedSigner = verifyMessage(tamperedDigest, target.signature).toLowerCase();
-  check("tampered denial field fails signature recovery", tamperedSigner !== String(target.signer).toLowerCase(), `recovered ${tamperedSigner}`);
-}
+  check("tampered denial field fails signature recovery", tamperedSigner !== String(target.signer).toLowerCase(), `recovered ${tamperedSigner}`); }
 
 // #4: event pagination + deployment-block start.
-{
-  const full = await http(`${RELAYER}/events`);
+{ const full = await http(`${RELAYER}/events`);
   const page = await http(`${RELAYER}/events?limit=1&offset=0`);
   check("events pagination works", page.json.events.length === 1 && page.json.count === full.json.count, `page=1 total=${page.json.count}`);
   const future = await http(`${RELAYER}/events?fromBlock=999999999`);
-  check("events from future block are empty", future.json.events.length === 0 && future.json.count === 0, `count=${future.json.count}`);
-}
+  check("events from future block are empty", future.json.events.length === 0 && future.json.count === 0, `count=${future.json.count}`); }
 
-// Concurrent issuance used to pass both uniqueness checks before the write lock.
-console.log("\n== Concurrent issuer requests ==");
-const before = (await getMembers()).length;
-const pair = [new Identity(), new Identity()];
-const sameDocument = { docType: "national-id", documentNumber: "RACE-123", fullName: "Test Only" };
-const race = await Promise.all(pair.map(id => http(`${ISSUER}/register`, "POST", { commitment: id.commitment.toString(), testId: sameDocument })));
-check("same document issued once under concurrent requests", race.filter(r => r.status === 201).length === 1 && race.filter(r => r.status === 409 && r.json.error === "DUPLICATE_IDENTITY").length === 1);
-const different = await Promise.all(["RACE-A", "RACE-B"].map(documentNumber => http(`${ISSUER}/register`, "POST", { commitment: new Identity().commitment.toString(), testId: { ...sameDocument, documentNumber } })));
-check("different concurrent documents receive distinct leaf indices", different.every(r => r.status === 201) && new Set(different.map(r => r.json.leafIndex)).size === 2);
-const finalMembers = await getMembers();
-const statusResult = await http(`${ISSUER}/status`);
-check("issuer mirror remains complete and ordered", finalMembers.length === before + 3 && new Group(finalMembers).root.toString() === statusResult.json.root);
-check("issuer status exposes actual contract and issuer role", typeof statusResult.json.trialFence === "string" && statusResult.json.isIssuer === true);
+// #4: concurrent issuer requests produce exactly one credential per document.
+{ const before = await getMembers();
+  const pair = [new Identity(), new Identity()];
+  const sameDocument = { docType: "national-id", documentNumber: "RACE-123", fullName: "Test Only" };
+  const race = await Promise.all(pair.map(id => http(`${ISSUER}/register`, "POST", { commitment: id.commitment.toString(), testId: sameDocument })));
+  check("same document issued once under concurrent requests", race.filter(r => r.status === 201).length === 1 && race.filter(r => r.status === 409 && r.json.error === "DUPLICATE_IDENTITY").length === 1);
+  const different = await Promise.all(["RACE-A", "RACE-B"].map(documentNumber => http(`${ISSUER}/register`, "POST", { commitment: new Identity().commitment.toString(), testId: { ...sameDocument, documentNumber } })));
+  check("different concurrent documents receive distinct leaf indices", different.every(r => r.status === 201) && new Set(different.map(r => r.json.leafIndex)).size === 2);
+  const finalMembers = await getMembers();
+  const statusResult = await http(`${ISSUER}/status`);
+  check("issuer mirror remains complete and ordered", finalMembers.length === before + 3 && new Group(finalMembers).root.toString() === statusResult.json.root);
+  check("issuer status exposes actual contract and issuer role", typeof statusResult.json.trialFence === "string" && statusResult.json.isIssuer === true); }
 
 const malformed = await http(`${RELAYER}/enroll`, "POST", { protocolId: "-1", siteId: "1", proof: {} });
 check("negative protocol ID is rejected before RPC", malformed.status === 400);

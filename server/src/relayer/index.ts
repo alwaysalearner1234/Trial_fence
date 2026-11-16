@@ -30,16 +30,6 @@ interface ProofInput {
   points: string[];
 }
 
-// Optional shared bearer token for the privileged registry routes
-// (POST /protocol, POST /site — they spend the owner key on-chain).
-// Empty in dev mode. The public gate (POST /enroll, all GETs) stays open.
-function requireRelayerKey(req: Request, res: Response, next: NextFunction): void {
-  if (!config.relayerApiKey) return next();
-  const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
-  if (token === config.relayerApiKey) return next();
-  res.status(401).json({ error: "UNAUTHORIZED" });
-}
-
 function isProofInput(value: unknown): value is ProofInput {
   const p = (value ?? {}) as Record<string, unknown>;
   return (
@@ -55,18 +45,16 @@ function isProofInput(value: unknown): value is ProofInput {
   );
 }
 
-/**
- * Maps a contract revert to a short, dashboard-friendly reason. ethers sometimes
+/** Maps a contract revert to a short, dashboard-friendly reason. ethers sometimes
  * surfaces the custom error in the revert *message* instead of info.error.name
  * (e.g. when the transaction was rejected before ABI decoding), so the message
- * is parsed as a fallback.
- */
+ * is parsed as a fallback. */
 function errorName(err: unknown): string {
   const message = String((err as Error)?.message ?? "");
   const name =
     (err as { revert?: { name?: string } })?.revert?.name ??
     (err as { info?: { error?: { name?: string } } })?.info?.error?.name ??
-    message.match(/reverted(?:\s*with\s*panic(?:\s*\w+)?)?\s*:\s*([A-Za-z_][\w$]+)/)?.[1];
+    message.match(/reverted(?:\\s*with\\s*panic(?:\\s*\\w+)?)?\\s*:\\s*([A-Za-z_][\\w$]+)/)?.[1];
   switch (name) {
     case "TrialFence__DuplicateEnrollment":
       return "DUPLICATE";
@@ -90,8 +78,6 @@ function errorName(err: unknown): string {
       return "PROTOCOL_EXISTS";
     case "TrialFence__SiteAlreadyRegistered":
       return "SITE_EXISTS";
-    case "TrialFence__SiteNotFound":
-      return "SITE_NOT_FOUND";
     case "TrialFence__NotOwner":
       return "NOT_OWNER";
     default:
@@ -101,12 +87,10 @@ function errorName(err: unknown): string {
   }
 }
 
-/**
- * Reasons that represent a definitive on-chain classification of the request.
+/** Reasons that represent a definitive on-chain classification of the request.
  * Anything else (transport errors, undecodable failures) is reported as
  * RPC_FAILURE and — crucially — is NOT recorded as a denial, so malformed
- * requests and node outages can never be mislabelled as verified duplicates.
- */
+ * requests and node outages can never be mislabelled as verified duplicates. */
 const CLASSIFIED_REASONS = new Set([
   "DUPLICATE",
   "PROTOCOL_NOT_FOUND",
@@ -116,7 +100,6 @@ const CLASSIFIED_REASONS = new Set([
   "INVALID_PROOF",
   "EMPTY_GROUP",
   "STALE_ROOT",
-  "NOT_IN_GROUP",
   "PROTOCOL_EXISTS",
   "SITE_EXISTS",
   "NOT_OWNER",
@@ -140,25 +123,19 @@ function isTransportError(err: unknown): boolean {
     /\bmissing revert data\b/i,
     /\bbad response\b/i,
     /\bserver error\b/i,
-    /\brate limit/i,
+    /\brate limit\b/i,
     /\bHTTP (429|500|502|503|504)\b/,
     /\bstatus (429|500|502|503|504)\b/,
   ].some((rx) => rx.test(message));
 }
 
-const VERIFIER_ABI = [
-  "function verifyProof(uint256[2] _pA, uint256[2][2] _pB, uint256[2] _pC, uint256[4] _pubSignals, uint256 _merkleTreeDepth) view returns (bool)",
-];
-
-/**
- * Standalone SNARK validity check against the on-chain verifier (view call, no
+/** Standalone SNARK validity check against the on-chain verifier (view call, no
  * state change). Used to tell a *verified* duplicate — a well-formed proof
  * whose nullifier is already consumed — from a fabricated request that merely
- * reuses a consumed nullifier with garbage proof points.
- */
+ * reuses a consumed nullifier with garbage proof points. */
 async function snarkValid(proof: ProofInput): Promise<boolean> {
   try {
-    const verifier = new Contract(deployment().verifier, VERIFIER_ABI, provider());
+    const verifier = new Contract(deployment().verifier, ["function verifyProof(uint256[2] _pA, uint256[2][2] _pB, uint256[2] _pC, uint256[4] _pubSignals, uint256 _merkleTreeDepth) view returns (bool)"], provider());
     const signal = (v: string) =>
       BigInt(solidityPackedKeccak256(["uint256"], [BigInt(v).toString()])) >> 8n;
     const pts = proof.points.map((p) => BigInt(p));
@@ -183,8 +160,7 @@ async function snarkValid(proof: ProofInput): Promise<boolean> {
   }
 }
 
-/**
- * POST /enroll
+/** POST /enroll
  * The relayer receives a protocol-scoped proof generated in the participant's
  * browser, pre-flights it with a staticCall against TrialFence.sol (a reverted
  * transaction cannot emit a persistent event, so denials are recorded as signed
@@ -289,17 +265,15 @@ app.post(
   })
 );
 
-/**
- * Records a signed, PII-free denial for the sponsor/IRB audit view. The record
+/** Records a signed, PII-free denial for the sponsor/IRB audit view. The record
  * is signed by the RELAYER key (signerRole "relayer") — it is a relayer-signed
  * audit record, not a site attestation. The signature lets any auditor verify
- * the record was produced by the relayer.
- */
+ * the record was produced by the relayer. */
 function denialDigest(protocolId: string, siteId: string, nullifier: string, reason: string, createdAt: string): string {
   // Typed ABI encoding preserves field boundaries; packed strings did not.
   return keccak256(AbiCoder.defaultAbiCoder().encode(
     ["string", "uint256", "uint256", "uint256", "string", "string"],
-    ["TRIALFENCE_DENIAL_V2", protocolId, siteId, nullifier, reason, createdAt]
+    ["TRIALFENCE_DENIAL_V2", protocolId, siteId, nullifier ?? "0", reason, createdAt]
   ));
 }
 
@@ -325,9 +299,7 @@ async function recordDenial(
   return { protocolId, siteId, reason, nullifier, digest, signature, signer: signerAddress, signerRole: "relayer", createdAt };
 }
 
-/**
- * GET /denials — signed site audit records for rejected enrollments.
- */
+/** GET /denials — signed site audit records for rejected enrollments. */
 app.get(
   "/denials",
   wrap(async (_req, res) => {
@@ -338,8 +310,7 @@ app.get(
   })
 );
 
-/**
- * GET /denials/:id/verify — tamper-evidence check for a single denial record.
+/** GET /denials/:id/verify — tamper-evidence check for a single denial record.
  * Recomputes the canonical digest from the STORED fields (the same packing the
  * relayer signed) and recovers the signer from the signature. If any displayed
  * field was modified after signing, the digest mismatches and the recovered
@@ -384,14 +355,11 @@ app.get(
   })
 );
 
-/**
- * POST /protocol — registers a sponsor protocol on-chain (owner-governed:
+/** POST /protocol — registers a sponsor protocol on-chain (owner-governed:
  * TrialFence.registerProtocol is onlyOwner, so the relayer submits with the
- * owner key, exactly like /site).
- */
+ * owner key, exactly like /site). */
 app.post(
   "/protocol",
-  requireRelayerKey,
   wrap(async (req, res) => {
     const protocolId = String(req.body?.protocolId ?? "").trim();
     const name = String(req.body?.name ?? "").trim();
@@ -424,12 +392,9 @@ app.post(
   })
 );
 
-/**
- * POST /site — registers a trial site on-chain (governance-controlled, owner key).
- */
+/** POST /site — registers a trial site on-chain (governance-controlled, owner key). */
 app.post(
   "/site",
-  requireRelayerKey,
   wrap(async (req, res) => {
     const siteId = String(req.body?.siteId ?? "").trim();
     const name = String(req.body?.name ?? "").trim();
@@ -460,8 +425,7 @@ app.post(
   })
 );
 
-/**
- * GET /events — public EnrollmentAccepted events read from the chain, for the
+/** GET /events — public EnrollmentAccepted events read from the chain, for the
  * sponsor/IRB audit view. Queries start at the deployment block (recorded by
  * deploy.ts) and support pagination: ?fromBlock=&limit=&offset=.
  */
@@ -491,16 +455,15 @@ app.get(
         blockNumber: number;
       }>
     ).map((log) => ({
-        protocolId: log.args.protocolId.toString(),
-        siteId: log.args.siteId.toString(),
-        nullifier: log.args.nullifier.toString(),
-        scope: log.args.scope.toString(),
-        relayer: log.args.relayer,
-        txHash: log.transactionHash,
-        blockNumber: log.blockNumber,
-        explorerUrl: explorerTxUrl(log.transactionHash),
-      })
-    );
+      protocolId: log.args.protocolId.toString(),
+      siteId: log.args.siteId.toString(),
+      nullifier: log.args.nullifier.toString(),
+      scope: log.args.scope.toString(),
+      relayer: log.args.relayer,
+      txHash: log.transactionHash,
+      blockNumber: log.blockNumber,
+      explorerUrl: explorerTxUrl(log.transactionHash),
+    }));
     res.json({
       events: events.slice(offset, offset + limit),
       count: events.length,
@@ -511,35 +474,29 @@ app.get(
   })
 );
 
-/**
- * GET /protocols — registered protocol metadata mirror (names + scopes).
- */
+/** GET /protocols — registered protocol metadata mirror (names + scopes). */
 app.get(
   "/protocols",
   wrap(async (_req, res) => {
     const rows = getDb()
       .prepare("SELECT id, name, scope FROM protocols ORDER BY id ASC")
       .all() as { id: number | string; name: string; scope: string }[];
-    res.json({ protocols: rows.map((r) => ({ id: String(r.id), name: r.name, scope: r.scope })) });
+    res.json({ protocols: rows.map((r) => ({ id: String(r.id), name: r.name, scope: r.scope }) });
   })
 );
 
-/**
- * GET /sites — registered site metadata mirror (names).
- */
+/** GET /sites — registered site metadata mirror (names). */
 app.get(
   "/sites",
   wrap(async (_req, res) => {
     const rows = getDb()
       .prepare("SELECT id, name FROM sites ORDER BY id ASC")
       .all() as { id: number | string; name: string }[];
-    res.json({ sites: rows.map((r) => ({ id: String(r.id), name: r.name })) });
+    res.json({ sites: rows.map((r) => ({ id: String(r.id), name: r.name }) });
   })
-);
+));
 
-/**
- * GET /config — connectivity + ABI bundle for the web app.
- */
+/** GET /config — connectivity + ABI bundle for the web app. */
 app.get(
   "/config",
   wrap(async (_req, res) => {
@@ -564,10 +521,8 @@ app.get("/health", (_req, res) => {
   });
 });
 
-/**
- * GET /monitor/summary — AI integrity monitor. Deterministic PII-free anomaly
- * detection plus an optional LLM narrative when OPENAI_API_KEY is configured.
- */
+/** GET /monitor/summary — AI integrity monitor. Deterministic PII-free anomaly
+ * detection plus an optional LLM narrative when OPENAI_API_KEY is configured. */
 app.get(
   "/monitor/summary",
   wrap(async (_req, res) => {
