@@ -1,11 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
 
-const repoRoot = path.resolve(__dirname, "..", "..");
-const envFile = path.join(repoRoot, ".env");
-if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
-const configPath = (key: string, fallback: string) => path.resolve(repoRoot, env(key, fallback));
-
 function env(key: string, fallback: string): string {
   return process.env[key] ?? fallback;
 }
@@ -30,15 +25,15 @@ export const config = {
   issuerPort: Number(env("PORT_ISSUER", "4001")),
   relayerPort: Number(env("PORT_RELAYER", "4002")),
 
-  deploymentFile: configPath(
+  deploymentFile: env(
     "DEPLOYMENT_FILE",
     path.join(__dirname, "..", "..", "contracts", "deployments", "localhost.json")
   ),
-  trialFenceArtifact: configPath(
+  trialFenceArtifact: env(
     "TRIALFENCE_ARTIFACT",
     path.join(__dirname, "..", "..", "contracts", "artifacts", "contracts", "TrialFence.sol", "TrialFence.json")
   ),
-  dbFile: configPath("DB_FILE", "server/data/trialfence.db"),
+  dbFile: env("DB_FILE", path.join(__dirname, "..", "..", "data", "trialfence.db")),
 
   // Hardhat default test accounts. NEVER use these on a public network.
   issuerPrivateKey: env(
