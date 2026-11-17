@@ -481,7 +481,7 @@ app.get(
     const rows = getDb()
       .prepare("SELECT id, name, scope FROM protocols ORDER BY id ASC")
       .all() as { id: number | string; name: string; scope: string }[];
-    res.json({ protocols: rows.map((r) => ({ id: String(r.id), name: r.name, scope: r.scope }) });
+    res.json({ protocols: rows.map((r) => ({ id: String(r.id), name: r.name, scope: r.scope })) });
   })
 );
 
@@ -492,9 +492,9 @@ app.get(
     const rows = getDb()
       .prepare("SELECT id, name FROM sites ORDER BY id ASC")
       .all() as { id: number | string; name: string }[];
-    res.json({ sites: rows.map((r) => ({ id: String(r.id), name: r.name }) });
+    res.json({ sites: rows.map((r) => ({ id: String(r.id), name: r.name })) });
   })
-));
+);
 
 /** GET /config — connectivity + ABI bundle for the web app. */
 app.get(
