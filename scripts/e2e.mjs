@@ -243,7 +243,7 @@ console.log("\n== Robustness ==");
   check("different concurrent documents receive distinct leaf indices", different.every(r => r.status === 201) && new Set(different.map(r => r.json.leafIndex)).size === 2);
   const finalMembers = await getMembers();
   const statusResult = await http(`${ISSUER}/status`);
-  check("issuer mirror remains complete and ordered", finalMembers.length === before + 3 && new Group(finalMembers).root.toString() === statusResult.json.root);
+  check("issuer mirror remains complete and ordered", finalMembers.length === before + 3 && new Group(finalMembers).root.toString() === statusResult.json.root, `len ${before}->${finalMembers.length} (want ${before + 3}); root ${new Group(finalMembers).root.toString()} vs ${statusResult.json.root}`);
   check("issuer status exposes actual contract and issuer role", typeof statusResult.json.trialFence === "string" && statusResult.json.isIssuer === true); }
 
 const malformed = await http(`${RELAYER}/enroll`, "POST", { protocolId: "-1", siteId: "1", proof: {} });

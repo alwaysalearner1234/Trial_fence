@@ -91,11 +91,27 @@ need to be opened.
 | Build command | `npm ci && npm run compile && npm run build -w web` |
 | Start command | `npm run start:render` |
 
-Env vars (dev values fine for a demo): `OWNER_PRIVATE_KEY`,
-`ISSUER_PRIVATE_KEY`, `RELAYER_PRIVATE_KEY`, `HMAC_SECRET`, optional
-`ISSUER_API_KEY`, `OPENAI_API_KEY`, `OPENAI_MODEL`. `PORT` is injected by
-Render; `NEXT_PUBLIC_RELAYER_URL`/`NEXT_PUBLIC_ISSUER_URL` are optional since
-the defaults point at the same-origin proxy.
+`package-lock.json` is committed, so `npm ci` works on CI and on Render.
+
+### Render environment variables
+
+The single-service demo works with **no environment variables**: leave `RPC_URL`
+and `DEPLOYMENT_FILE` unset so `render-start.mjs` stays in local demo mode
+(in-memory Hardhat chain, redeployed on every restart). `PORT` is injected by
+Render.
+
+| Variable | Required? | What it does / what to do if you set it |
+|---|---|---|
+| `OWNER_PRIVATE_KEY` | Optional | Key that deploys/owns the contract and signs protocol/site registration. In local demo mode `deploy.ts` deploys from this key (and funds it automatically via `hardhat_setBalance`). If you set it, use a key you control; the relayer logs the contract owner and the signer address at startup. |
+| `ISSUER_PRIVATE_KEY` | Optional | Key that issues group memberships. In local demo mode the deploy script sets the contract issuer to this key's address (falling back to `ISSUER_ADDRESS`, then Hardhat #1), so issuance does not revert with `NotIssuer`. |
+| `RELAYER_PRIVATE_KEY` | Optional | Key that submits enrollments and signs denial records. |
+| `HMAC_SECRET` | Optional locally, **required** for a public network | Keyed HMAC digest for document numbers. Use a dedicated random value for any non-local deployment. |
+| `ISSUER_API_KEY` | Optional | If set, `POST /register` requires `Authorization: Bearer <value>`. Enter the same value in the coordinator page's **Issuer Authorization Token** field. If you do not want auth, leave it unset. |
+| `RELAYER_API_KEY` | Optional | If set, `POST /protocol` and `POST /site` require `Authorization: Bearer <value>`. Enter the same value in the sponsor page's **Sponsor / Registry Bearer Token** field. If you do not want auth, leave it unset. |
+| `OPENAI_API_KEY`, `OPENAI_MODEL` | Optional | Enables the optional LLM narrative in the sponsor integrity monitor. Rule-based flags work without it. |
+| `EXPLORER_URL` | Optional | Adds block-explorer links to transaction hashes. |
+| `NEXT_PUBLIC_RELAYER_URL`, `NEXT_PUBLIC_ISSUER_URL` | Optional | Default to the same-origin Next proxy; only set them if you split the services onto separate hosts. |
+| `RPC_URL`, `DEPLOYMENT_FILE` | Optional | Leave unset for the single-service local demo. A non-loopback `RPC_URL` (or a non-`localhost.json` deployment file) switches `render-start.mjs` to hosted mode: it will **not** start a chain or deploy, and it exits if the deployment file is missing. |
 
 > The chain and `server/data` sqlite are ephemeral (reset on each deploy).
 > For a persistent deployment use a managed chain (e.g. Polygon Amoy,
@@ -104,11 +120,13 @@ the defaults point at the same-origin proxy.
 ## Demo script (2 minutes)
 
 Use the **Sponsor** tab to register protocol `1` ("TrialFence-01") and sites `1` and `2`.
+If the server sets `RELAYER_API_KEY`, paste it into the sponsor page's registry-token field first.
 
 1. **Volunteer tab** — your anonymous identity (commitment) is created in the browser and stored in
    `localStorage`. Copy the commitment. _You are not in the group yet_ — the button stays disabled.
-2. **Coordinator tab** — the commitment auto-fills from the same browser. Enter a demo document number
-   (e.g. `AB1234567`) + name and click *Verify ID & issue membership*. The registry dedupes on the
+2. **Coordinator tab** — the commitment auto-fills from the same browser. If the server sets
+   `ISSUER_API_KEY`, paste it into the issuer-token field. Enter a demo document number
+   (e.g. `AB1234567`) + name and click *Verify ID & issue group membership*. The registry dedupes on the
    document digest, so the *same* physical credential can only be registered once.
 3. **Volunteer tab** — pick protocol `1` site `1`, click *Generate proof & submit*. → **accepted**, and
    the on-chain event/tx appears on the Sponsor audit table.
@@ -125,6 +143,10 @@ runs the smoke test end-to-end over HTTP.
 Copy `.env.example` to `.env` (or rely on the defaults baked into `server/src/config.ts`). The default
 dev keys are the well-known Hardhat test accounts. See `.env.example` for testnet (Polygon Amoy) and the
 optional `OPENAI_API_KEY` used by the AI monitor.
+
+`ISSUER_API_KEY` and `RELAYER_API_KEY` are optional. When set, the issuer and
+relayer log a startup warning and the corresponding UI field must contain the
+token; local demo mode works with both unset.
 
 ## Threat model (what is / isn't protected)
 

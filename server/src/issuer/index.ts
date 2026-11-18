@@ -27,7 +27,10 @@ function requireIssuerKey(req: Request, res: Response, next: NextFunction) {
   if (!config.issuerApiKey) return next();
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
   if (token === config.issuerApiKey) return next();
-  res.status(401).json({ error: "UNAUTHORIZED" });
+  res.status(401).json({
+    error: "UNAUTHORIZED",
+    detail: "issuer token required (ISSUER_API_KEY is set); enter it in the coordinator page's issuer-token field",
+  });
 }
 
 /** GET /members — public identity commitments in verified-group order, used by the
@@ -255,5 +258,14 @@ async function reconcileMembership(): Promise<void> {
 app.listen(config.issuerPort, () => {
   console.log(`[issuer] listening on http://127.0.0.1:${config.issuerPort}`);
   console.log(`[issuer] contract: ${deployment().trialFence} (network ${deployment().network})`);
+  try {
+    if (deployment().chainId === 31337 && config.issuerApiKey) {
+      console.warn(
+        "[issuer] ISSUER_API_KEY is set: POST /register requires a Bearer token. Enter it in the coordinator page's issuer-token field, or unset ISSUER_API_KEY for an open local demo."
+      );
+    }
+  } catch {
+    /* deployment-file errors surface from the routes above. */
+  }
   reconcileMembership().catch((err) => console.error("[issuer] reconcile failed:", err));
 });

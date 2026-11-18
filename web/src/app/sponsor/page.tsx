@@ -36,6 +36,19 @@ interface MonitorData {
   totals: Record<string, unknown>;
 }
 
+/** Turn the two common registry failures into an actionable message instead of
+ * a raw server string. */
+function describeRegistryError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/UNAUTHORIZED|\b401\b/i.test(msg)) {
+    return "Registry token required. This deployment has RELAYER_API_KEY set: enter the sponsor/registry bearer token above, or unset RELAYER_API_KEY on the server for an open local demo.";
+  }
+  if (msg.includes("NOT_OWNER")) {
+    return "Relayer owner key does not match the contract owner. Check OWNER_PRIVATE_KEY on the server: it must belong to the deployer/owner address.";
+  }
+  return msg;
+}
+
 // ── Clean rectangular severity badge (no pill) ────────────────
 function SeverityBadge({ severity }: { severity: string }) {
   const s = severity.toLowerCase();
@@ -98,7 +111,7 @@ export default function SponsorPage() {
       setPName("");
       void refresh();
     } catch (e) {
-      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+      setMsg({ ok: false, text: describeRegistryError(e) });
     } finally {
       setPBusy(false);
     }
@@ -114,7 +127,7 @@ export default function SponsorPage() {
       setSName("");
       void refresh();
     } catch (e) {
-      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+      setMsg({ ok: false, text: describeRegistryError(e) });
     } finally {
       setSBusy(false);
     }
@@ -237,7 +250,8 @@ export default function SponsorPage() {
           <div>
             <h2 className="card-title">Registry Authorization</h2>
             <p className="card-subtitle">
-              Sponsor token required for privileged write transactions (protocol and site registration). Stored strictly in component state.
+              Optional locally: enter the token only when the server sets <code>RELAYER_API_KEY</code>. Privileged write
+              transactions (protocol and site registration) require it then. Stored strictly in component state.
             </p>
           </div>
         </div>

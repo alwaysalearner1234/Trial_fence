@@ -23,7 +23,7 @@ import {
 const DOC_TYPES = ["passport", "national-id", "driver-license"];
 
 interface Outcome {
-  status: "ok" | "duplicate" | "error";
+  status: "ok" | "duplicate" | "error" | "unauthorized";
   message: string;
 }
 
@@ -86,10 +86,16 @@ export default function CoordinatorPage() {
       void refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      const unauthorized = /UNAUTHORIZED|\b401\b/i.test(msg);
       setOutcome({
-        status:
-          msg.includes("DUPLICATE") || msg.includes("ALREADY") ? "duplicate" : "error",
-        message: msg,
+        status: unauthorized
+          ? "unauthorized"
+          : msg.includes("DUPLICATE") || msg.includes("ALREADY")
+          ? "duplicate"
+          : "error",
+        message: unauthorized
+          ? "Issuer token required. This deployment has ISSUER_API_KEY set: enter the issuer authorization token above, or unset ISSUER_API_KEY on the server for an open local demo."
+          : msg,
       });
     } finally {
       setBusy(false);
@@ -233,7 +239,7 @@ export default function CoordinatorPage() {
           <label htmlFor="issuer-token">
             Issuer Authorization Token
             <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "var(--muted)" }}>
-              (optional Bearer token if required by deployment)
+              (required only when ISSUER_API_KEY is set)
             </span>
           </label>
           <input
@@ -330,6 +336,8 @@ export default function CoordinatorPage() {
                   ? "Membership Successfully Issued"
                   : outcome.status === "duplicate"
                   ? "Duplicate Credential Detected"
+                  : outcome.status === "unauthorized"
+                  ? "Issuer Token Required"
                   : "Credential Issuance Failed"}
               </strong>
               <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 12, wordBreak: "break-all" }}>

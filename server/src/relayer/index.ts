@@ -21,6 +21,24 @@ const wrap =
     });
   };
 
+/** Optional shared bearer token for the privileged registry routes
+ * (POST /protocol, POST /site — they spend the owner key on-chain).
+ * Empty in dev mode. The public gate (POST /enroll, all GETs) stays open. */
+function requireRelayerKey(req: Request, res: Response, next: NextFunction): void {
+  if (!config.relayerApiKey) return next();
+  const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  if (token === config.relayerApiKey) return next();
+  res.status(401).json({
+    error: "UNAUTHORIZED",
+    detail: "relayer token required (RELAYER_API_KEY is set); enter it in the sponsor registry-token field",
+  });
+}
+
+/** Readable detail for the most common local-deployment mistake: WEB3 signer
+ * key differs from the address that deployed (and therefore owns) the contract. */
+const NOT_OWNER_DETAIL =
+  "Relayer owner key does not match the contract owner; check OWNER_PRIVATE_KEY (and redeploy so the owner matches)";
+
 interface ProofInput {
   merkleTreeDepth: number;
   merkleTreeRoot: string;
@@ -54,7 +72,7 @@ function errorName(err: unknown): string {
   const name =
     (err as { revert?: { name?: string } })?.revert?.name ??
     (err as { info?: { error?: { name?: string } } })?.info?.error?.name ??
-    message.match(/reverted(?:\\s*with\\s*panic(?:\\s*\\w+)?)?\\s*:\\s*([A-Za-z_][\\w$]+)/)?.[1];
+    message.match(/reverted(?:\s*with\s*panic(?:\s*\w+)?)?\s*:\s*([A-Za-z_][\w$]+)/)?.[1];
   switch (name) {
     case "TrialFence__DuplicateEnrollment":
       return "DUPLICATE";
@@ -64,8 +82,8 @@ function errorName(err: unknown): string {
       return "WRONG_SCOPE";
     case "TrialFence__SiteMismatch":
       return "SITE_MISMATCH";
-    case "TrialFence__SiteNotRegistered":
-      return "SITE_NOT_REGISTERED";
+    case "TrialFence__SiteNotFound":
+      return "SITE_NOT_FOUND";
     case "TrialFence__InvalidProof":
       return "INVALID_PROOF";
     case "TrialFence__GroupHasNoMembers":
@@ -74,12 +92,18 @@ function errorName(err: unknown): string {
       return "STALE_ROOT";
     case "TrialFence__MerkleTreeRootIsNotPartOfTheGroup":
       return "NOT_IN_GROUP";
+    case "TrialFence__MerkleTreeDepthNotSupported":
+      return "DEPTH_NOT_SUPPORTED";
     case "TrialFence__ProtocolAlreadyExists":
       return "PROTOCOL_EXISTS";
     case "TrialFence__SiteAlreadyRegistered":
       return "SITE_EXISTS";
+    case "TrialFence__EmptySiteName":
+      return "EMPTY_SITE_NAME";
     case "TrialFence__NotOwner":
       return "NOT_OWNER";
+    case "TrialFence__NotIssuer":
+      return "NOT_ISSUER";
     default:
       return name?.startsWith("TrialFence__")
         ? name.slice("TrialFence__".length).toUpperCase()
@@ -100,9 +124,13 @@ const CLASSIFIED_REASONS = new Set([
   "INVALID_PROOF",
   "EMPTY_GROUP",
   "STALE_ROOT",
+  "NOT_IN_GROUP",
+  "DEPTH_NOT_SUPPORTED",
   "PROTOCOL_EXISTS",
   "SITE_EXISTS",
+  "EMPTY_SITE_NAME",
   "NOT_OWNER",
+  "NOT_ISSUER",
 ]);
 
 function isTransportError(err: unknown): boolean {
@@ -360,6 +388,7 @@ app.get(
  * owner key, exactly like /site). */
 app.post(
   "/protocol",
+  requireRelayerKey,
   wrap(async (req, res) => {
     const protocolId = String(req.body?.protocolId ?? "").trim();
     const name = String(req.body?.name ?? "").trim();
@@ -370,15 +399,30 @@ app.post(
     const contract = trialFenceContract(ownerWallet());
     const expectedScope = scopeFor(protocolId);
 
-    await contract.registerProtocol.staticCall(protocolId, name);
-    const receipt = await withWriteLock(async () => {
-      const nonce = await latestNonce(ownerWallet());
-      const tx = await contract.connect(ownerWallet()).registerProtocol(protocolId, name, { nonce });
-      return await tx.wait();
-    });
+    let receipt;
+    try {
+      await contract.registerProtocol.staticCall(protocolId, name);
+      receipt = await withWriteLock(async () => {
+        const nonce = await latestNonce(ownerWallet());
+        const tx = await contract.connect(ownerWallet()).registerProtocol(protocolId, name, { nonce });
+        return await tx.wait();
+      });
+    } catch (err) {
+      if (errorName(err) === "NOT_OWNER") {
+        const signerAddress = await ownerWallet().getAddress();
+        console.error(`[relayer] registerProtocol rejected: ${NOT_OWNER_DETAIL} (signer ${signerAddress})`);
+        return res.status(403).json({ error: "NOT_OWNER", detail: NOT_OWNER_DETAIL });
+      }
+      throw err;
+    }
 
+    // Upsert: the chain is ephemeral in the single-service demo, but the SQLite
+    // mirror can survive a restart. Re-registering the same ID must refresh the
+    // mirror instead of failing with a UNIQUE constraint after the tx succeeded.
     getDb()
-      .prepare("INSERT INTO protocols (id, name, scope, created_at) VALUES (?, ?, ?, ?)")
+      .prepare(
+        "INSERT INTO protocols (id, name, scope, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, scope = excluded.scope"
+      )
       .run(BigInt(protocolId).toString(), name, expectedScope.toString(), new Date().toISOString());
 
     return res.json({
@@ -395,6 +439,7 @@ app.post(
 /** POST /site — registers a trial site on-chain (governance-controlled, owner key). */
 app.post(
   "/site",
+  requireRelayerKey,
   wrap(async (req, res) => {
     const siteId = String(req.body?.siteId ?? "").trim();
     const name = String(req.body?.name ?? "").trim();
@@ -404,15 +449,27 @@ app.post(
 
     const contract = trialFenceContract(ownerWallet());
 
-    await contract.registerSite.staticCall(siteId, name);
-    const receipt = await withWriteLock(async () => {
-      const nonce = await latestNonce(ownerWallet());
-      const tx = await contract.registerSite(siteId, name, { nonce });
-      return await tx.wait();
-    });
+    let receipt;
+    try {
+      await contract.registerSite.staticCall(siteId, name);
+      receipt = await withWriteLock(async () => {
+        const nonce = await latestNonce(ownerWallet());
+        const tx = await contract.registerSite(siteId, name, { nonce });
+        return await tx.wait();
+      });
+    } catch (err) {
+      if (errorName(err) === "NOT_OWNER") {
+        const signerAddress = await ownerWallet().getAddress();
+        console.error(`[relayer] registerSite rejected: ${NOT_OWNER_DETAIL} (signer ${signerAddress})`);
+        return res.status(403).json({ error: "NOT_OWNER", detail: NOT_OWNER_DETAIL });
+      }
+      throw err;
+    }
 
     getDb()
-      .prepare("INSERT INTO sites (id, name, created_at) VALUES (?, ?, ?)")
+      .prepare(
+        "INSERT INTO sites (id, name, created_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name"
+      )
       .run(BigInt(siteId).toString(), name, new Date().toISOString());
 
     return res.json({
@@ -530,7 +587,39 @@ app.get(
   })
 );
 
+/** Log the contract owner next to the key that signs registry writes. A mismatch
+ * is the usual cause of TrialFence__NotOwner on /protocol and /site. */
+async function logOwnerDiagnostics(): Promise<void> {
+  try {
+    const contract = trialFenceContract(provider());
+    const chainOwner = String(await contract.owner());
+    const signerAddress = await ownerWallet().getAddress();
+    const match = chainOwner.toLowerCase() === signerAddress.toLowerCase();
+    console.log(`[relayer] contract owner: ${chainOwner}`);
+    console.log(`[relayer] owner signer:   ${signerAddress}${match ? " (match)" : " (MISMATCH)"}`);
+    if (!match) {
+      console.warn(
+        `[relayer] OWNER_PRIVATE_KEY does not match the contract owner: protocol/site registration will revert with TrialFence__NotOwner. ${NOT_OWNER_DETAIL}.`
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `[relayer] could not compare the owner signer with the contract owner: ${String((error as Error)?.message ?? error)}`
+    );
+  }
+}
+
 app.listen(config.relayerPort, () => {
   console.log(`[relayer] listening on http://127.0.0.1:${config.relayerPort}`);
   console.log(`[relayer] contract: ${deployment().trialFence} (network ${deployment().network})`);
+  try {
+    if (deployment().chainId === 31337 && config.relayerApiKey) {
+      console.warn(
+        "[relayer] RELAYER_API_KEY is set: POST /protocol and POST /site require a Bearer token. Enter it in the sponsor page's registry-token field, or unset RELAYER_API_KEY for an open local demo."
+      );
+    }
+  } catch {
+    /* deployment-file errors surface from the routes above. */
+  }
+  void logOwnerDiagnostics();
 });
