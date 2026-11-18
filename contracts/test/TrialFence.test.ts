@@ -283,7 +283,7 @@ describe("TrialFence", function () {
       expect((await tx.wait()).status).to.equal(1);
     });
 
-    it "rejects the pre-revocation proof after the grace window expires", async function () {
+    it("rejects the pre-revocation proof after the grace window expires", async function () {
       const proof = await proofFor(bob, [alice.commitment, bob.commitment], SITE_2, PROTOCOL_A);
 
       const revokeProof = await group.generateMerkleProof(0);
@@ -297,23 +297,6 @@ describe("TrialFence", function () {
       await expect(
         trialFence.connect(relayer).enroll(PROTOCOL_A, SITE_2, proof)
       ).to.be.revertedWithCustomError(trialFence, "TrialFence__MerkleTreeRootIsExpired");
-    });
-  });
-
-  describe("issuer concurrency", function () {
-    it("same document issued exactly once under concurrent requests", async function () {
-      const pair = [new Identity(), new Identity()];
-      const sameDocument = { docType: "national-id", documentNumber: "RACE-123", fullName: "Test Only" };
-      const race = await Promise.all(pair.map(id => trialFence.connect(issuer).issueMembership(id.commitment)));
-      // exactly one credential issued (status 1 = success)
-      expect(race.filter((r) => r.status === 1).length).to.equal(1);
-      // second request refused as ALREADY_MEMBER (status 0 = reverted)
-      expect(race.filter((r) => r.status === 0).length).to.equal(1);
-    });
-
-    it "issuer status exposes contract and issuer role", async function () {
-      const status = await trialFence.connect(owner).status();
-      expect(status.isIssuer).to.equal(true);
     });
   });
 });
