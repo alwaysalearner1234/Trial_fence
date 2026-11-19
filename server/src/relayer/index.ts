@@ -21,6 +21,18 @@ const wrap =
     });
   };
 
+/** Optional shared bearer token for the privileged registry routes
+ *  (POST /protocol, POST /site — both spend the owner key on-chain).
+ *  Empty token = dev mode (no auth). The public gate (POST /enroll and all
+ *  GET routes) stays open. Note: the Next proxy is not access control, so
+ *  this check must live here. */
+function requireRegistryKey(req: Request, res: Response, next: NextFunction) {
+  if (!config.relayerApiKey) return next();
+  const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  if (token === config.relayerApiKey) return next();
+  res.status(401).json({ error: "UNAUTHORIZED" });
+}
+
 interface ProofInput {
   merkleTreeDepth: number;
   merkleTreeRoot: string;
@@ -64,8 +76,8 @@ function errorName(err: unknown): string {
       return "WRONG_SCOPE";
     case "TrialFence__SiteMismatch":
       return "SITE_MISMATCH";
-    case "TrialFence__SiteNotRegistered":
-      return "SITE_NOT_REGISTERED";
+    case "TrialFence__SiteNotFound":
+      return "SITE_NOT_FOUND";
     case "TrialFence__InvalidProof":
       return "INVALID_PROOF";
     case "TrialFence__GroupHasNoMembers":
@@ -100,6 +112,7 @@ const CLASSIFIED_REASONS = new Set([
   "INVALID_PROOF",
   "EMPTY_GROUP",
   "STALE_ROOT",
+  "NOT_IN_GROUP",
   "PROTOCOL_EXISTS",
   "SITE_EXISTS",
   "NOT_OWNER",
@@ -360,6 +373,7 @@ app.get(
  * owner key, exactly like /site). */
 app.post(
   "/protocol",
+  requireRegistryKey,
   wrap(async (req, res) => {
     const protocolId = String(req.body?.protocolId ?? "").trim();
     const name = String(req.body?.name ?? "").trim();
@@ -395,6 +409,7 @@ app.post(
 /** POST /site — registers a trial site on-chain (governance-controlled, owner key). */
 app.post(
   "/site",
+  requireRegistryKey,
   wrap(async (req, res) => {
     const siteId = String(req.body?.siteId ?? "").trim();
     const name = String(req.body?.name ?? "").trim();

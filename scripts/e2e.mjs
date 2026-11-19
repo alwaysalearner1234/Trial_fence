@@ -234,7 +234,7 @@ console.log("\n== Robustness ==");
   check("events from future block are empty", future.json.events.length === 0 && future.json.count === 0, `count=${future.json.count}`); }
 
 // #4: concurrent issuer requests produce exactly one credential per document.
-{ const before = await getMembers();
+{ const before = (await getMembers()).length;
   const pair = [new Identity(), new Identity()];
   const sameDocument = { docType: "national-id", documentNumber: "RACE-123", fullName: "Test Only" };
   const race = await Promise.all(pair.map(id => http(`${ISSUER}/register`, "POST", { commitment: id.commitment.toString(), testId: sameDocument })));
