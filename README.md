@@ -140,9 +140,12 @@ runs the smoke test end-to-end over HTTP.
 
 ## Configuration
 
-Copy `.env.example` to `.env` (or rely on the defaults baked into `server/src/config.ts`). The default
-dev keys are the well-known Hardhat test accounts. See `.env.example` for testnet (Polygon Amoy) and the
-optional `OPENAI_API_KEY` used by the AI monitor.
+Copy `.env.example` to `.env` to override anything, or rely on the defaults baked into
+`server/src/config.ts`. Both the issuer and the relayer load the repository-root `.env` at
+startup — the same file `contracts/hardhat.config.ts` and `scripts/render-start.mjs` read —
+and variables already present in the environment take precedence over it. The default dev
+keys are the well-known Hardhat test accounts. See `.env.example` for testnet (Polygon Amoy)
+and the optional `OPENAI_API_KEY` used by the AI monitor.
 
 `ISSUER_API_KEY` and `RELAYER_API_KEY` are optional. When set, the issuer and
 relayer log a startup warning and the corresponding UI field must contain the

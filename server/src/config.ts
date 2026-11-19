@@ -1,6 +1,18 @@
 import * as fs from "fs";
 import * as path from "path";
 
+// Load the repository-root .env, the same way contracts/hardhat.config.ts and
+// scripts/render-start.mjs already do. Without this, `npm run issuer` /
+// `npm run relayer` (started straight through ts-node) silently ignore a copied
+// .env, so DB_FILE, RPC_URL and the key settings documented in .env.example
+// never apply on the documented local path. Node's --env-file semantics apply:
+// variables already set in process.env take precedence, so an explicit
+// environment still wins over the file.
+const rootEnvFile = path.join(__dirname, "..", "..", ".env");
+if (fs.existsSync(rootEnvFile)) {
+  process.loadEnvFile(rootEnvFile);
+}
+
 function env(key: string, fallback: string): string {
   return process.env[key] ?? fallback;
 }
@@ -19,26 +31,37 @@ export interface DeploymentInfo {
   deploymentBlock?: number;
 }
 
+const repoRoot = path.join(__dirname, "..", "..");
+
+/**
+ * .env.example documents repo-relative paths (DEPLOYMENT_FILE,
+ * TRIALFENCE_ARTIFACT, DB_FILE). The services are started with cwd = server/
+ * (`npm run issuer -w server`), so a relative value taken from .env must be
+ * resolved against the repo root rather than the process cwd — otherwise it
+ * points at server/contracts/... and the ABI/deployment load fails at startup.
+ * Absolute values are passed through untouched.
+ */
+function fromRoot(value: string): string {
+  return path.isAbsolute(value) ? value : path.join(repoRoot, value);
+}
+
 export const config = {
   rpcUrl: env("RPC_URL", "http://127.0.0.1:8545"),
 
   issuerPort: Number(env("PORT_ISSUER", "4001")),
   relayerPort: Number(env("PORT_RELAYER", "4002")),
 
-  deploymentFile: env(
-    "DEPLOYMENT_FILE",
-    path.join(__dirname, "..", "..", "contracts", "deployments", "localhost.json")
+  deploymentFile: fromRoot(
+    env("DEPLOYMENT_FILE", path.join(repoRoot, "contracts", "deployments", "localhost.json"))
   ),
-  trialFenceArtifact: env(
-    "TRIALFENCE_ARTIFACT",
-    path.join(__dirname, "..", "..", "contracts", "artifacts", "contracts", "TrialFence.sol", "TrialFence.json")
+  trialFenceArtifact: fromRoot(
+    env("TRIALFENCE_ARTIFACT", path.join(repoRoot, "contracts", "artifacts", "contracts", "TrialFence.sol", "TrialFence.json"))
   ),
-  // Resolves to server/data/trialfence.db, matching DB_FILE in .env.example and
-  // the server/data/ entry in .gitignore. It previously resolved to the repo
-  // root, so the documented path and the real one disagreed: a run without an
-  // explicit DB_FILE wrote the audit database to an undocumented location while
-  // the documented path stayed empty.
-  dbFile: env("DB_FILE", path.join(__dirname, "..", "data", "trialfence.db")),
+  // Defaults to server/data/trialfence.db, matching DB_FILE in .env.example and
+  // the server/data/ entry in .gitignore (it previously resolved to the repo root,
+  // so the documented path and the real one disagreed). Relative values supplied
+  // via .env are resolved against the repo root, not the process cwd.
+  dbFile: fromRoot(env("DB_FILE", path.join(repoRoot, "server", "data", "trialfence.db"))),
 
   // Hardhat default test accounts. NEVER use these on a public network.
   issuerPrivateKey: env(
