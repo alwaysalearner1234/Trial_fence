@@ -1,6 +1,6 @@
 // Isolated local integration run. Never uses a team deployment, wallet or database.
 import { createRequire } from "node:module";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -11,6 +11,8 @@ const temp = mkdtempSync(path.join(tmpdir(), "trialfence-test-"));
 const children = [];
 const require = createRequire(import.meta.url);
 const token = "integration-test-only";
+const webPort = process.env.TEST_WEB_PORT ?? "3000";
+const webBase = `http://127.0.0.1:${webPort}`;
 const env = { ...process.env, DB_FILE: path.join(temp, "test.db"), ISSUER_API_KEY: token, RELAYER_API_KEY: token,
   RPC_URL: "http://127.0.0.1:8545", DEPLOYMENT_FILE: path.join(root, "contracts/deployments/localhost.json"),
   PORT_ISSUER: "4001", PORT_RELAYER: "4002", OPENAI_API_KEY: "" };
@@ -38,7 +40,19 @@ async function ready(url, init) {
   }
   throw new Error(`Service did not become ready: ${url}`);
 }
-function stop(child) { try { process.kill(-child.pid, "SIGTERM"); } catch {} }
+function stop(child) {
+  if (!child || child.exitCode !== null) return;
+  try {
+    // POSIX: negative pid signals the whole detached process group.
+    // Windows has no process groups, so kill the tree explicitly; otherwise
+    // children survive, hold the temp database open and cleanup throws EPERM.
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    } else {
+      process.kill(-child.pid, "SIGTERM");
+    }
+  } catch {}
+}
 
 try {
   const node = start("chain", [path.join(root, "node_modules/hardhat/internal/cli/cli.js"), "node", "--hostname", "127.0.0.1"], path.join(root, "contracts"));
@@ -55,13 +69,13 @@ try {
     if (response.status !== 401) throw new Error(`Unauthenticated ${endpoint} was not blocked.`);
   }
   console.log("PASS  registry writes require token; public enrollment stays open");
-  const web = start("web", [require.resolve("next/dist/bin/next", { paths: [path.join(root, "web")] }), "start", "-p", "3000", "-H", "127.0.0.1"], path.join(root, "web"));
-  await ready("http://127.0.0.1:3000/api/relayer/health");
-  await ready("http://127.0.0.1:3000/api/issuer/members");
-  const protectedProxy = await fetch("http://127.0.0.1:3000/api/relayer/site", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  const web = start("web", [require.resolve("next/dist/bin/next", { paths: [path.join(root, "web")] }), "start", "-p", webPort, "-H", "127.0.0.1"], path.join(root, "web"));
+  await ready(`${webBase}/api/relayer/health`);
+  await ready(`${webBase}/api/issuer/members`);
+  const protectedProxy = await fetch(`${webBase}/api/relayer/site`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   if (protectedProxy.status !== 401) throw new Error("Next proxy bypassed registry authorization.");
-  env.ISSUER_URL = "http://127.0.0.1:3000/api/issuer";
-  env.RELAYER_URL = "http://127.0.0.1:3000/api/relayer";
+  env.ISSUER_URL = `${webBase}/api/issuer`;
+  env.RELAYER_URL = `${webBase}/api/relayer`;
   console.log("PASS  production Next proxy preserves authorization and public reads");
   await finish(start("e2e", [path.join(root, "scripts/e2e.mjs")], root, true));
 
@@ -101,7 +115,7 @@ try {
   console.log("PASS  RPC failure returns 503 without creating a denial record");
   for (const child of children.filter(child => child !== web.child)) stop(child);
   await new Promise(resolve => setTimeout(resolve, 500));
-  const proxyOutage = await fetch("http://127.0.0.1:3000/api/relayer/health");
+  const proxyOutage = await fetch(`${webBase}/api/relayer/health`);
   const proxyBody = await proxyOutage.json();
   if (proxyOutage.status !== 503 || proxyBody.error !== "SERVICE_UNAVAILABLE") throw new Error("Next proxy outage did not return retryable JSON.");
   console.log("PASS  unavailable backend returns JSON 503 through the Next proxy");
@@ -110,5 +124,11 @@ try {
   process.exitCode = 1;
 } finally {
   for (const child of children) stop(child);
-  rmSync(temp, { recursive: true, force: true });
+  // Windows may hold file handles briefly after a kill; retry, then give up
+  // quietly so a locked temp dir cannot turn a passing run into a crash.
+  await new Promise(resolve => setTimeout(resolve, 750));
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try { rmSync(temp, { recursive: true, force: true }); break; }
+    catch { await new Promise(resolve => setTimeout(resolve, 500)); }
+  }
 }
