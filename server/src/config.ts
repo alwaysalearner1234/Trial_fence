@@ -33,7 +33,10 @@ export const config = {
     "TRIALFENCE_ARTIFACT",
     path.join(__dirname, "..", "..", "contracts", "artifacts", "contracts", "TrialFence.sol", "TrialFence.json")
   ),
-  dbFile: env("DB_FILE", path.join(__dirname, "..", "..", "data", "trialfence.db")),
+  // Resolves to server/data/trialfence.db, matching DB_FILE in .env.example and
+  // the server/data/ entry in .gitignore. (It previously resolved to the repo
+  // root, so the documented path and the real one disagreed.)
+  dbFile: env("DB_FILE", path.join(__dirname, "..", "data", "trialfence.db")),
 
   // Hardhat default test accounts. NEVER use these on a public network.
   issuerPrivateKey: env(
