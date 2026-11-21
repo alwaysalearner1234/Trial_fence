@@ -9,7 +9,7 @@
 ![Solidity](https://img.shields.io/badge/Solidity-0.8.28-363636?logo=solidity&logoColor=white)
 ![Semaphore](https://img.shields.io/badge/Semaphore-v4-6E56CF)
 
-**[Live Demo](https://trialfence-frontend.onrender.com/)** · **[Video Demo](#)** · **[Pitch Deck](web/public/TrialFence_Phase2_Pitch_Deck.pdf)**
+**[Live Demo](https://trialfence-frontend.onrender.com/)** · **[Video Demo](#)** · **[Pitch Deck](TrialFence_Phase2_Pitch_Deck.pdf)**
 
 TrialFence lets a participant enroll at only one site per clinical-trial protocol without exposing identity.
 A coordinator verifies physical ID documents off-chain; only a one-way identity commitment and a Semaphore
